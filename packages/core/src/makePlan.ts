@@ -1,18 +1,74 @@
 import {
   Assignment,
   AvailabilityBlock,
+  PlanPreferences,
   PlanRequest,
   PlanResult,
   PlannerPlanSession
 } from './types';
 import { computeUrgencyScore } from './urgencyScore';
 
+const MINUTES_PER_DAY = 24 * 60;
+const LATE_NIGHT_START_MIN = 22 * 60;
+
 interface Slot {
   startMin: number;
   endMin: number;
 }
 
-function buildSlots(blocks: AvailabilityBlock[], sessionMin: number): Slot[] {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeCourse(course: string): string {
+  return course.trim().toLowerCase();
+}
+
+function getCourseWeight(course: string, weights?: Record<string, number>): number {
+  if (!weights) return 0;
+  const key = normalizeCourse(course);
+  const weighted = weights[key];
+  if (!Number.isFinite(weighted)) return 0;
+  return weighted;
+}
+
+function applyAvailabilityPreferences(
+  blocks: AvailabilityBlock[],
+  preferences?: PlanPreferences
+): AvailabilityBlock[] {
+  if (!preferences) return blocks;
+
+  const preferredStart = clamp(
+    preferences.preferredStudyWindow?.startMin ?? 0,
+    0,
+    MINUTES_PER_DAY - 1
+  );
+  const preferredEnd = clamp(
+    preferences.preferredStudyWindow?.endMin ?? MINUTES_PER_DAY,
+    1,
+    MINUTES_PER_DAY
+  );
+  if (preferredEnd <= preferredStart) return [];
+
+  return blocks.flatMap((block) => {
+    const dayStartMin = Math.floor(block.startMin / MINUTES_PER_DAY) * MINUTES_PER_DAY;
+    const windowStartMin = dayStartMin + preferredStart;
+    let windowEndMin = dayStartMin + preferredEnd;
+    if (preferences.avoidLateNight) {
+      windowEndMin = Math.min(windowEndMin, dayStartMin + LATE_NIGHT_START_MIN);
+    }
+    const startMin = Math.max(block.startMin, windowStartMin);
+    const endMin = Math.min(block.endMin, windowEndMin);
+    if (endMin <= startMin) return [];
+    return [{ ...block, startMin, endMin }];
+  });
+}
+
+function buildSlots(
+  blocks: AvailabilityBlock[],
+  sessionMin: number,
+  breakBetweenSessionsMin: number
+): Slot[] {
   const slots: Slot[] = [];
   const sorted = [...blocks].sort((a, b) => a.startMin - b.startMin);
 
@@ -20,7 +76,7 @@ function buildSlots(blocks: AvailabilityBlock[], sessionMin: number): Slot[] {
     let cursor = block.startMin;
     while (cursor + sessionMin <= block.endMin) {
       slots.push({ startMin: cursor, endMin: cursor + sessionMin });
-      cursor += sessionMin;
+      cursor += sessionMin + breakBetweenSessionsMin;
     }
   }
 
@@ -28,8 +84,17 @@ function buildSlots(blocks: AvailabilityBlock[], sessionMin: number): Slot[] {
 }
 
 export function makePlan(req: PlanRequest): PlanResult {
-  const sessionMin = req.sessionMin && req.sessionMin > 0 ? req.sessionMin : 30;
+  const requestedSessionMin = req.sessionMin && req.sessionMin > 0 ? req.sessionMin : 30;
+  const maxSessionMin = req.preferences?.maxSessionMin && req.preferences.maxSessionMin > 0
+    ? req.preferences.maxSessionMin
+    : 120;
+  const sessionMin = Math.min(requestedSessionMin, maxSessionMin);
+  const breakBetweenSessionsMin = clamp(req.preferences?.breakBetweenSessionsMin ?? 0, 0, 180);
   const warnings: string[] = [];
+
+  if (requestedSessionMin > sessionMin) {
+    warnings.push(`Session length capped at ${sessionMin} minutes based on your planner settings.`);
+  }
 
   const pendingAssignments: Assignment[] = req.assignments.filter((a) => !a.completed);
 
@@ -37,8 +102,17 @@ export function makePlan(req: PlanRequest): PlanResult {
     return { sessions: [], warnings: ['No pending assignments to schedule.'] };
   }
 
-  const slots = buildSlots(req.availability, sessionMin);
+  const preferredAvailability = applyAvailabilityPreferences(req.availability, req.preferences);
+  const slots = buildSlots(preferredAvailability, sessionMin, breakBetweenSessionsMin);
   if (slots.length === 0) {
+    if (req.availability.length > 0 && preferredAvailability.length === 0) {
+      return {
+        sessions: [],
+        warnings: [
+          'No availability remains after applying your study window and late-night preferences.',
+        ],
+      };
+    }
     return {
       sessions: [],
       warnings: ['No availability blocks configured. Add availability to generate a plan.']
@@ -46,8 +120,8 @@ export function makePlan(req: PlanRequest): PlanResult {
   }
 
   const scoredAssignments = [...pendingAssignments].sort((a, b) => {
-    const scoreA = computeUrgencyScore(a, req.now);
-    const scoreB = computeUrgencyScore(b, req.now);
+    const scoreA = computeUrgencyScore(a, req.now) + getCourseWeight(a.course, req.preferences?.coursePriorityWeights);
+    const scoreB = computeUrgencyScore(b, req.now) + getCourseWeight(b.course, req.preferences?.coursePriorityWeights);
     // higher score first, break ties by due date then id for determinism
     if (scoreB !== scoreA) return scoreB - scoreA;
 
@@ -89,4 +163,3 @@ export function makePlan(req: PlanRequest): PlanResult {
 
   return { sessions, warnings };
 }
-

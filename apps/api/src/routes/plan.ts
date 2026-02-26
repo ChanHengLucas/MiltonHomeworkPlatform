@@ -6,6 +6,7 @@ import {
   listAvailabilityBlocks,
   listCourseAssignmentsForStudent,
   listGradingTasksByTeacher,
+  getPlannerPreferences,
 } from '@planner/db';
 import { makePlan } from '@planner/core';
 import type { Assignment, AvailabilityBlock } from '@planner/core';
@@ -100,6 +101,7 @@ planRouter.post('/', async (req: Request, res, next) => {
 
   const userEmail = req.user?.email || '';
   const isTeacher = isTeacherEligible(userEmail);
+  const preferences = userEmail ? getPlannerPreferences(userEmail) : null;
 
   let assignments: Assignment[] = [...listAssignments()];
 
@@ -107,7 +109,7 @@ planRouter.post('/', async (req: Request, res, next) => {
     const courseAssignments = listCourseAssignmentsForStudent(userEmail);
     for (const ca of courseAssignments) {
       assignments.push(
-        toPlanAssignment(ca.id, `[Course]`, ca.title, ca.dueAtMs, ca.estMinutes, ca.type)
+        toPlanAssignment(ca.id, ca.courseName || 'Course', ca.title, ca.dueAtMs, ca.estMinutes, ca.type)
       );
     }
     if (isTeacher) {
@@ -134,7 +136,33 @@ planRouter.post('/', async (req: Request, res, next) => {
     availability,
     sessionMin: parsed.data.sessionMin,
     now: parsed.data.now,
+    preferences: preferences
+      ? {
+          preferredStudyWindow: {
+            startMin: preferences.studyWindowStartMin,
+            endMin: preferences.studyWindowEndMin,
+          },
+          maxSessionMin: preferences.maxSessionMin,
+          breakBetweenSessionsMin: preferences.breakBetweenSessionsMin,
+          avoidLateNight: preferences.avoidLateNight,
+          coursePriorityWeights: preferences.coursePriorityWeights,
+        }
+      : undefined,
   });
+
+  const log = (req as Request & { log?: { info: (obj: object, message: string) => void } }).log;
+  if (log) {
+    log.info(
+      {
+        userEmail,
+        assignmentCount: assignments.length,
+        availabilityCount: availability.length,
+        busyBlocks: busyBlocks?.length ?? 0,
+        sessionMin: parsed.data.sessionMin ?? null,
+      },
+      '[Plan] Generated plan'
+    );
+  }
 
   res.json(result);
 });

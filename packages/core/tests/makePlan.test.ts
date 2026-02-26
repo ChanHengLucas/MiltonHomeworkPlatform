@@ -88,5 +88,72 @@ describe('makePlan', () => {
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.warnings[0]).toMatch(/Insufficient time/i);
   });
-});
 
+  it('caps session length and inserts breaks when preferences are set', () => {
+    const result = makePlan({
+      assignments: [mkAssignment('as1', { estMinutes: 90 })],
+      availability: [mkAvailability('a1', 0, 120)],
+      sessionMin: 60,
+      preferences: {
+        maxSessionMin: 30,
+        breakBetweenSessionsMin: 10,
+      },
+      now: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result.sessions).toHaveLength(3);
+    expect(result.sessions[0]).toMatchObject({ startMin: 0, endMin: 30 });
+    expect(result.sessions[1]).toMatchObject({ startMin: 40, endMin: 70 });
+    expect(result.warnings.some((w) => /capped/i.test(w))).toBeTruthy();
+  });
+
+  it('filters late-night time when avoidLateNight preference is enabled', () => {
+    const result = makePlan({
+      assignments: [mkAssignment('as1', { estMinutes: 180 })],
+      availability: [mkAvailability('a1', 20 * 60, 23 * 60)],
+      sessionMin: 30,
+      preferences: {
+        avoidLateNight: true,
+      },
+      now: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result.sessions).toHaveLength(4);
+    expect(result.sessions[result.sessions.length - 1]).toMatchObject({
+      startMin: 21 * 60 + 30,
+      endMin: 22 * 60,
+    });
+  });
+
+  it('applies course priority weights deterministically', () => {
+    const assignments = [
+      mkAssignment('as1', {
+        course: 'Math',
+        title: 'Math worksheet',
+        dueAt: new Date('2026-02-10T20:00:00Z').getTime(),
+        estMinutes: 30,
+      }),
+      mkAssignment('as2', {
+        course: 'History',
+        title: 'History essay',
+        dueAt: new Date('2026-02-10T20:00:00Z').getTime(),
+        estMinutes: 30,
+      }),
+    ];
+    const availability = [mkAvailability('a1', 0, 120)];
+
+    const result = makePlan({
+      assignments,
+      availability,
+      sessionMin: 30,
+      preferences: {
+        coursePriorityWeights: {
+          history: 2,
+        },
+      },
+      now: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result.sessions[0].assignmentId).toBe('as2');
+  });
+});

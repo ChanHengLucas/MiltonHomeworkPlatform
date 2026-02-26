@@ -1,26 +1,26 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Insights + Teacher gating', () => {
-  test('Student A -> Teacher toggle disabled; Teacher -> allowed; Insights teacher-only', async ({
+  test('student hides teacher nav, teacher can access teacher pages and insights', async ({
     page,
   }) => {
-    await page.goto('/settings');
-
-    // Student A - Teacher mode toggle disabled
+    await page.goto('/assignments');
     await page.selectOption('.dev-identity-select', 'student-a');
-    const teacherToggle = page.locator('label:has-text("Teacher Mode")');
-    await expect(teacherToggle).toHaveClass(/toggle-disabled/);
-    await expect(teacherToggle.locator('input')).toBeDisabled();
+    await expect(page.locator('.nav-link:has-text("Teacher")')).not.toBeVisible();
+    await expect(page.locator('.nav-link:has-text("Insights")')).not.toBeVisible();
+
+    await page.goto('/teacher');
+    await expect(page.locator('h1')).toContainText('Teacher dashboard only');
 
     // Student visits /insights -> sees "Teacher dashboard only" page
     await page.goto('/insights');
     await expect(page.locator('h1')).toContainText('Teacher dashboard only');
     await expect(page.locator('text=Back to Support Hub')).toBeVisible();
 
-    // Teacher - Teacher mode allowed
+    // Teacher can see teacher navigation and insights
     await page.selectOption('.dev-identity-select', 'teacher');
-    await expect(teacherToggle).not.toHaveClass(/toggle-disabled/);
-    await expect(teacherToggle.locator('input')).toBeEnabled();
+    await expect(page.locator('.nav-link:has-text("Teacher")')).toBeVisible();
+    await expect(page.locator('.nav-link:has-text("Insights")')).toBeVisible();
 
     // Teacher visits insights -> sees activity overview
     await page.goto('/insights');

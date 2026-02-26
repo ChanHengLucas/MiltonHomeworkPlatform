@@ -43,6 +43,7 @@ authRouter.get('/google/start', (req: Request, res: Response) => {
     scope: scopes,
     prompt: 'consent',
   });
+  console.log('[Auth] Redirecting to Google OAuth start');
   res.redirect(url);
 });
 
@@ -73,6 +74,7 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       access_token: tokens.access_token || undefined,
       refresh_token: tokens.refresh_token || undefined,
     };
+    console.log('[Auth] Google callback success', { email });
 
     await new Promise<void>((resolve, reject) => {
       req.session.save((err) => {
@@ -112,6 +114,7 @@ authRouter.get('/me', (req: Request, res: Response) => {
   if (!user?.email) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
+  console.log('[Auth] /me resolved from session', { email: user.email });
   res.json({
     email: user.email,
     name: user.name,

@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+const API_BASE = process.env.API_BASE || 'http://localhost:4000';
+
 test.describe('Close request + cleanup (dev)', () => {
   test('close request, disappears from list, cleanup deletes from DB', async ({
     page,
@@ -24,20 +26,21 @@ test.describe('Close request + cleanup (dev)', () => {
     // Close the request
     await page.click('button:has-text("Close request")');
 
-    // Go back to list - should not appear (show closed unchecked by default)
+    // Go back to list (open filter default) - should not appear
     await page.goto('/support');
     await expect(page.locator('.request-card-title:has-text("Cleanup test request")')).not.toBeVisible();
 
-    // Enable show closed - should appear
-    await page.check('input[type="checkbox"]');
+    // Switch filter to closed - should appear
+    await page.click('button.filter-chip:has-text("Closed")');
     await expect(page.locator('.request-card-title:has-text("Cleanup test request")')).toBeVisible();
 
     // Trigger dev cleanup (days=0 deletes all closed)
-    const cleanupRes = await apiRequest.post('http://localhost:4000/api/admin/cleanup-closed?days=0');
+    const cleanupRes = await apiRequest.post(`${API_BASE}/api/admin/cleanup-closed?days=0`);
     expect(cleanupRes.ok()).toBeTruthy();
 
-    // Refresh - even with show closed, request should be gone
+    // Refresh and switch to closed again - request should be gone
     await page.reload();
+    await page.click('button.filter-chip:has-text("Closed")');
     await expect(page.locator('.request-card-title:has-text("Cleanup test request")')).not.toBeVisible();
   });
 });

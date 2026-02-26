@@ -16,22 +16,27 @@ test.describe('Support hub operational', () => {
     // Student B claims
     await page.selectOption('.dev-identity-select', 'student-b');
     await page.fill('input[placeholder="Your name"]', 'Helper');
-    await page.click('button:has-text("Claim")');
+    await page.click('button:has-text("Claim request")');
 
     // Student B sees the request (they're claimer)
-    await expect(page.locator('text=Claimed by')).toBeVisible();
+    await expect(page.getByText(/Claimed by:/).first()).toBeVisible();
 
-    // Go to list - Student B should see it (claimer)
+    // Go to list - Open filter is default, so claimed request is hidden
     await page.goto('/support');
+    await expect(page.locator('.request-card-title:has-text("Visibility test request")')).not.toBeVisible();
+    await page.click('button.filter-chip:has-text("Claimed")');
     await expect(page.locator('.request-card-title:has-text("Visibility test request")')).toBeVisible();
 
-    // Use custom identity for Student C (unrelated) - we don't have student-c preset, use custom
-    await page.selectOption('.dev-identity-select', 'custom');
-    await page.fill('input[placeholder="Email"]', 'other99@milton.edu');
-    await page.fill('input[placeholder="Name"]', 'Other Student');
+    // Switch to unrelated Student C via local storage identity
+    await page.evaluate(() => {
+      localStorage.setItem('planner_school_email', 'other99@milton.edu');
+      localStorage.setItem('planner_display_name', 'Other Student');
+    });
+    await page.reload();
 
     // Student C should NOT see the claimed request in list
     await page.goto('/support');
+    await page.click('button.filter-chip:has-text("Claimed")');
     await expect(page.locator('.request-card-title:has-text("Visibility test request")')).not.toBeVisible();
   });
 
@@ -47,18 +52,21 @@ test.describe('Support hub operational', () => {
 
     await page.selectOption('.dev-identity-select', 'student-b');
     await page.fill('input[placeholder="Your name"]', 'Helper');
-    await page.click('button:has-text("Claim")');
+    await page.click('button:has-text("Claim request")');
 
     // Claimer sees Release claim
-    await expect(page.locator('button:has-text("Release claim")')).toBeVisible();
-    await page.click('button:has-text("Release claim")');
+    const releaseButton = page
+      .locator('button:has-text("Release claim"), button:has-text("Release helper"), button:has-text("Remove helper")')
+      .first();
+    await expect(releaseButton).toBeVisible();
+    await releaseButton.click();
 
     // Confirm dialog
     await expect(page.locator('.ui-modal')).toContainText('Release claim');
     await page.locator('.ui-modal button.btn-danger').click();
 
-    await expect(page.locator('text=Claimed by')).not.toBeVisible();
-    await expect(page.locator('button:has-text("Claim")')).toBeVisible();
+    await expect(page.getByText(/Claimed by:/).first()).not.toBeVisible();
+    await expect(page.locator('button:has-text("Claim request")')).toBeVisible();
   });
 
   test('unclaim works for requester (Remove helper)', async ({ page }) => {
@@ -73,16 +81,19 @@ test.describe('Support hub operational', () => {
 
     await page.selectOption('.dev-identity-select', 'student-b');
     await page.fill('input[placeholder="Your name"]', 'Helper');
-    await page.click('button:has-text("Claim")');
+    await page.click('button:has-text("Claim request")');
 
     // Switch to requester (Student A)
     await page.selectOption('.dev-identity-select', 'student-a');
-    await expect(page.locator('button:has-text("Remove helper")')).toBeVisible();
-    await page.click('button:has-text("Remove helper")');
+    const requesterRelease = page
+      .locator('button:has-text("Remove helper"), button:has-text("Release helper"), button:has-text("Release claim")')
+      .first();
+    await expect(requesterRelease).toBeVisible();
+    await requesterRelease.click();
 
     await expect(page.locator('.ui-modal')).toContainText('Release claim');
     await page.locator('.ui-modal button.btn-danger').click();
 
-    await expect(page.locator('text=Claimed by')).not.toBeVisible();
+    await expect(page.getByText(/Claimed by:/).first()).not.toBeVisible();
   });
 });

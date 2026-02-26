@@ -10,6 +10,12 @@ function urgencyLabel(u: string): string {
   return u === 'med' ? 'Medium' : u.charAt(0).toUpperCase() + u.slice(1);
 }
 
+function statusClass(value: string): string {
+  if (value === 'claimed') return 'status-chip status-claimed';
+  if (value === 'closed') return 'status-chip status-closed';
+  return 'status-chip status-open';
+}
+
 export function SupportDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { suggestedClaimName, schoolEmail } = useAppState();
@@ -180,11 +186,11 @@ export function SupportDetailPage() {
           <span className="breadcrumb-sep">/</span>
           <span>Request</span>
         </nav>
-        <Card>
-          <h2 className="section-title">Not available</h2>
-          <p className="page-subtitle">
-            This request is not visible to you. Claimed and closed requests are only visible to the requester, claimer, or teachers.
-          </p>
+      <Card>
+        <h2 className="section-title">Not available</h2>
+        <p className="page-subtitle">
+            This request is not visible to you. Claimed and closed requests are only visible to the requester, helper, or teachers.
+        </p>
           <p style={{ marginTop: '1rem' }}>
             <Link to="/support" className="link">← Back to Support Hub</Link>
           </p>
@@ -203,9 +209,16 @@ export function SupportDetailPage() {
       </nav>
 
       <Card>
-        <h2 className="section-title">{request.title}</h2>
+        <div className="split-header">
+          <h2 className="section-title" style={{ marginBottom: 0 }}>{request.title}</h2>
+          <span className={statusClass(request.status)}>
+            {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+          </span>
+        </div>
         <div className="request-card-meta" style={{ marginBottom: '0.75rem' }}>
-          {request.subject} · {urgencyLabel(request.urgency)} · {request.status}
+          <span>{request.subject}</span>
+          <span>·</span>
+          <span>{urgencyLabel(request.urgency)}</span>
           {request.createdByEmail && (
             <span style={{ display: 'block', marginTop: '0.25rem' }}>
               From: {request.createdByEmail}
@@ -225,7 +238,7 @@ export function SupportDetailPage() {
           </p>
         )}
 
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="support-actions">
           {request.status === 'open' && (
             <>
               {isOwnRequest ? (
@@ -240,7 +253,7 @@ export function SupportDetailPage() {
                     style={{ maxWidth: 200 }}
                   />
                   <Button onClick={handleClaim} disabled={!!actionLoading}>
-                    {actionLoading === 'claim' ? 'Claiming…' : 'Claim'}
+                    {actionLoading === 'claim' ? 'Claiming…' : 'Claim request'}
                   </Button>
                 </>
               )}
@@ -252,12 +265,12 @@ export function SupportDetailPage() {
               onClick={() => setConfirmUnclaim(true)}
               disabled={!!actionLoading}
             >
-              {isClaimer ? 'Release claim' : isRequester ? 'Remove helper' : 'Unclaim'}
+              {isClaimer ? 'Release claim' : isRequester ? 'Remove helper' : 'Release helper'}
             </Button>
           )}
           {canReport && (
             <Button variant="secondary" onClick={() => setReportOpen(true)} disabled={!!actionLoading}>
-              Report
+              Report helper
             </Button>
           )}
           {canClose && (

@@ -147,6 +147,17 @@ export interface PlanResult {
   warnings: string[];
 }
 
+export interface PlannerPreferences {
+  userEmail: string;
+  studyWindowStartMin: number;
+  studyWindowEndMin: number;
+  maxSessionMin: number;
+  breakBetweenSessionsMin: number;
+  avoidLateNight: boolean;
+  coursePriorityWeights: Record<string, number>;
+  updatedAt: string;
+}
+
 export interface HelpRequest {
   id: string;
   title: string;
@@ -196,6 +207,21 @@ export const api = {
     request<{ startMs: number; endMs: number; source: string }[]>(
       `/calendar/busy${days != null ? `?days=${days}` : ''}`
     ),
+
+  getPlannerPreferences: () =>
+    request<PlannerPreferences>('/settings/planner-preferences'),
+  updatePlannerPreferences: (body: {
+    studyWindowStartMin: number;
+    studyWindowEndMin: number;
+    maxSessionMin: number;
+    breakBetweenSessionsMin: number;
+    avoidLateNight: boolean;
+    coursePriorityWeights: Record<string, number>;
+  }) =>
+    request<PlannerPreferences>('/settings/planner-preferences', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 
   // Teacher
   listTeacherCourses: () => request<{ id: string; name: string; teacherEmail: string; createdAt: string }[]>('/teacher/courses'),
