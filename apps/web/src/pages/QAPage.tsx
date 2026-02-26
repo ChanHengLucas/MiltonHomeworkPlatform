@@ -16,7 +16,7 @@ function getNextWeekEpoch(): number {
 export function QAPage() {
   const navigate = useNavigate();
   const { schoolEmail, setSchoolEmail, setDisplayName } = useAppState();
-  const [results, setResults] = useState<Record<string, boolean | string>>({});
+  const [results, setResults] = useState<Record<string, string | undefined>>({});
   const [running, setRunning] = useState(false);
 
   function setResult(key: string, ok: boolean, details?: string) {
@@ -87,7 +87,12 @@ export function QAPage() {
 
     try {
       const requests = await api.listRequests({ showClosed: true });
-      const openReq = requests.find((r) => r.status === 'open' && r.createdByEmail === 'lucas12@milton.edu');
+      const openReq = requests.find(
+        (r) =>
+          r.status === 'open'
+          && r.createdByEmail === 'lucas12@milton.edu'
+          && !r.title?.includes('Self-claim')
+      );
       if (!openReq) {
         setResult('claimOther', false, 'No open request from Student A');
         return;

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { AuthProvider } from './context/AuthContext';
@@ -13,9 +14,12 @@ import { SupportDetailPage } from './pages/SupportDetailPage';
 import { InsightsPage } from './pages/InsightsPage';
 import { LoginPage } from './pages/LoginPage';
 import { TeacherDashboardPage } from './pages/TeacherDashboardPage';
-import { QAPage } from './pages/QAPage';
 
 import './App.css';
+
+const DevQAPage = import.meta.env.DEV
+  ? lazy(() => import('./pages/QAPage').then((m) => ({ default: m.QAPage })))
+  : null;
 
 function App() {
   return (
@@ -34,7 +38,16 @@ function App() {
               <Route path="teacher" element={<TeacherDashboardPage />} />
               <Route path="insights" element={<InsightsPage />} />
               <Route path="settings" element={<SettingsPage />} />
-              {import.meta.env.DEV && <Route path="qa" element={<QAPage />} />}
+              {DevQAPage && (
+                <Route
+                  path="qa"
+                  element={(
+                    <Suspense fallback={<p>Loading…</p>}>
+                      <DevQAPage />
+                    </Suspense>
+                  )}
+                />
+              )}
             </Route>
           </Routes>
         </AppProvider>
