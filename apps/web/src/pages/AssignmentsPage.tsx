@@ -31,6 +31,7 @@ export function AssignmentsPage() {
   });
 
   const courses = [...new Set(assignments.map((a) => a.course).filter(Boolean))].sort();
+  const addAssignmentFormId = 'add-assignment-form';
 
   useEffect(() => {
     load();
@@ -139,7 +140,23 @@ export function AssignmentsPage() {
   return (
     <div className="page">
       <h1 className="page-title">Assignments</h1>
-      <p className="page-subtitle">Paste homework or test info and save it.</p>
+      <p className="page-subtitle">Track personal assignments and teacher-published work in one place.</p>
+
+      <Card>
+        <div className="split-header">
+          <div>
+            <h2 className="section-title" style={{ marginBottom: '0.25rem' }}>Quick add</h2>
+            <p className="form-hint" style={{ margin: 0 }}>Paste assignment text or fill the form manually.</p>
+          </div>
+          <Button
+            onClick={() => {
+              document.getElementById(addAssignmentFormId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+          >
+            Add assignment
+          </Button>
+        </div>
+      </Card>
 
       <Card>
         <h2 className="section-title">Paste assignment</h2>
@@ -156,7 +173,7 @@ export function AssignmentsPage() {
       </Card>
 
       <Card>
-        <h2 className="section-title">Confirm assignment</h2>
+        <h2 className="section-title" id={addAssignmentFormId}>Personal assignment details</h2>
         <div className="form-grid">
           <div className="form-group">
             <label>Title</label>
@@ -228,7 +245,7 @@ export function AssignmentsPage() {
             </select>
           </div>
         </div>
-        <Button onClick={() => handleSave(false)}>Save Assignment</Button>
+        <Button onClick={() => handleSave(false)}>Add assignment</Button>
       </Card>
 
       {error && (
@@ -237,10 +254,17 @@ export function AssignmentsPage() {
         </Callout>
       )}
 
-      {teacherAssignments.length > 0 && (
-        <Card>
-          <h2 className="section-title">From teachers</h2>
-          <div className="assignment-list">
+      <Card>
+        <div className="split-header">
+          <h2 className="section-title" style={{ marginBottom: 0 }}>From teachers</h2>
+          <span className="form-hint">Read-only assignments shared from your enrolled courses.</span>
+        </div>
+        {teacherAssignments.length === 0 ? (
+          <p className="empty-state" style={{ marginTop: '0.75rem' }}>
+            Nothing published yet. Your teacher assignments will appear here.
+          </p>
+        ) : (
+          <div className="assignment-list" style={{ marginTop: '0.75rem' }}>
             {teacherAssignments.map((a) => (
               <div key={a.id} className="assignment-card">
                 <div className="assignment-card-content">
@@ -255,17 +279,30 @@ export function AssignmentsPage() {
               </div>
             ))}
           </div>
-        </Card>
-      )}
+        )}
+      </Card>
 
       <Card>
-        <h2 className="section-title">Personal assignments</h2>
+        <div className="split-header">
+          <h2 className="section-title" style={{ marginBottom: 0 }}>Personal assignments</h2>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              document.getElementById(addAssignmentFormId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+          >
+            Add assignment
+          </Button>
+        </div>
         {loading ? (
           <p>Loading…</p>
         ) : assignments.length === 0 ? (
-          <p className="empty-state">Paste something above to add your first assignment.</p>
+          <p className="empty-state" style={{ marginTop: '0.75rem' }}>
+            No personal assignments yet. Use "Add assignment" to create your first one.
+          </p>
         ) : (
-          <div className="assignment-list">
+          <div className="assignment-list" style={{ marginTop: '0.75rem' }}>
             {assignments.map((a) => (
               <div
                 key={a.id}

@@ -4,6 +4,20 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, type HelpRequest } from '../api';
 import { Button, Card, Callout } from '../components/ui';
 
+function urgencyLabel(value: string): string {
+  return value === 'med' ? 'Medium' : value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function statusLabel(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function statusClass(value: string): string {
+  if (value === 'claimed') return 'status-chip status-claimed';
+  if (value === 'closed') return 'status-chip status-closed';
+  return 'status-chip status-open';
+}
+
 export function SupportPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -18,8 +32,7 @@ export function SupportPage() {
   });
   const [filterSubject, setFilterSubject] = useState('');
   const [filterUrgency, setFilterUrgency] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [showClosed, setShowClosed] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<'open' | 'claimed' | 'closed' | ''>('open');
 
   const prefilledTitle = searchParams.get('title');
   const prefilledLinkedId = searchParams.get('linkedAssignmentId');
@@ -38,7 +51,7 @@ export function SupportPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterSubject, filterUrgency, filterStatus, showClosed]);
+  }, [filterSubject, filterUrgency, filterStatus]);
 
   async function load() {
     try {
@@ -48,7 +61,7 @@ export function SupportPage() {
         subject: filterSubject || undefined,
         urgency: filterUrgency || undefined,
         status: filterStatus || undefined,
-        showClosed: showClosed || undefined,
+        showClosed: (filterStatus === 'closed' || filterStatus === '') || undefined,
       });
       setRequests(data);
     } catch (e) {
@@ -140,7 +153,37 @@ export function SupportPage() {
       </Card>
 
       <Card>
-        <h2 className="section-title">Filter</h2>
+        <h2 className="section-title">Browse requests</h2>
+        <div className="filters-inline" style={{ marginBottom: '0.75rem' }}>
+          <button
+            type="button"
+            className={`filter-chip ${filterStatus === 'open' ? 'active' : ''}`}
+            onClick={() => setFilterStatus('open')}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            className={`filter-chip ${filterStatus === 'claimed' ? 'active' : ''}`}
+            onClick={() => setFilterStatus('claimed')}
+          >
+            Claimed
+          </button>
+          <button
+            type="button"
+            className={`filter-chip ${filterStatus === 'closed' ? 'active' : ''}`}
+            onClick={() => setFilterStatus('closed')}
+          >
+            Closed
+          </button>
+          <button
+            type="button"
+            className={`filter-chip ${filterStatus === '' ? 'active' : ''}`}
+            onClick={() => setFilterStatus('')}
+          >
+            All
+          </button>
+        </div>
         <div className="filter-row">
           <input
             className="ui-input"
@@ -160,25 +203,6 @@ export function SupportPage() {
             <option value="med">Medium</option>
             <option value="high">High</option>
           </select>
-          <select
-            className="ui-select"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            style={{ maxWidth: 120 }}
-          >
-            <option value="">Any status</option>
-            <option value="open">Open</option>
-            <option value="claimed">Claimed</option>
-            <option value="closed">Closed</option>
-          </select>
-          <label className="filter-toggle">
-            <input
-              type="checkbox"
-              checked={showClosed}
-              onChange={(e) => setShowClosed(e.target.checked)}
-            />
-            Show closed
-          </label>
         </div>
       </Card>
 
@@ -189,13 +213,20 @@ export function SupportPage() {
       )}
 
       <Card>
-        <h2 className="section-title">Requests</h2>
+        <div className="split-header">
+          <h2 className="section-title" style={{ marginBottom: 0 }}>Requests</h2>
+          <span className="form-hint">
+            Showing {filterStatus ? statusLabel(filterStatus).toLowerCase() : 'all'} requests
+          </span>
+        </div>
         {loading ? (
           <p>Loading…</p>
         ) : requests.length === 0 ? (
-          <p className="empty-state">No requests yet. Create one above.</p>
+          <p className="empty-state" style={{ marginTop: '0.75rem' }}>
+            No requests match these filters. Try "All" or create a new request.
+          </p>
         ) : (
-          <div className="request-cards">
+          <div className="request-cards" style={{ marginTop: '0.75rem' }}>
             {requests.map((r) => (
               <div
                 key={r.id}
@@ -204,7 +235,10 @@ export function SupportPage() {
               >
                 <div className="request-card-title">{r.title}</div>
                 <div className="request-card-meta">
-                  {r.subject} · {r.urgency === 'med' ? 'Medium' : r.urgency.charAt(0).toUpperCase() + r.urgency.slice(1)} · {r.status}
+                  <span className={statusClass(r.status)}>{statusLabel(r.status)}</span>
+                  <span>{r.subject}</span>
+                  <span>·</span>
+                  <span>{urgencyLabel(r.urgency)}</span>
                   {r.createdByEmail ? ` · ${r.createdByEmail}` : ''}
                   {r.linkedAssignmentId ? ' · Linked' : ''}
                 </div>
