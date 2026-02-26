@@ -4,7 +4,7 @@
  * Uses data/test.db for E2E to avoid polluting dev data.
  */
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -50,7 +50,21 @@ function waitFor(url, label, maxAttempts = 60) {
   });
 }
 
+function buildWorkspace(workspace) {
+  const result = spawnSync('npm', ['run', 'build', '-w', workspace], {
+    cwd: ROOT,
+    env: process.env,
+    stdio: 'inherit',
+  });
+  if (result.status !== 0) {
+    throw new Error(`Failed to build ${workspace}`);
+  }
+}
+
 async function main() {
+  buildWorkspace('packages/core');
+  buildWorkspace('packages/db');
+
   console.log('[E2E] Starting API server...');
   const testDbPath = path.join(ROOT, 'data', 'test.db');
   for (const dbPath of [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`]) {
@@ -74,7 +88,7 @@ async function main() {
   const apiProc = spawn('npm', ['run', 'dev', '--workspace', 'apps/api'], {
     cwd: ROOT,
     env: apiEnv,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'inherit', 'inherit'],
   });
 
   console.log('[E2E] Starting Vite dev server...');
@@ -88,7 +102,7 @@ async function main() {
       VITE_PORT: String(VITE_PORT),
       VITE_API_PROXY_TARGET: API_URL,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'inherit', 'inherit'],
   });
 
   function killAll() {

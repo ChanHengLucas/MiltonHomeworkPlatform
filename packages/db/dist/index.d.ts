@@ -93,6 +93,16 @@ export interface GradingTask {
     estMinutes: number;
     createdAt: string;
 }
+export interface PlannerPreferences {
+    userEmail: string;
+    studyWindowStartMin: number;
+    studyWindowEndMin: number;
+    maxSessionMin: number;
+    breakBetweenSessionsMin: number;
+    avoidLateNight: boolean;
+    coursePriorityWeights: Record<string, number>;
+    updatedAt: string;
+}
 export declare function createCourse(course: Course): Course;
 export declare function listCoursesByTeacher(teacherEmail: string): Course[];
 export declare function getCourse(id: string): Course | null;
@@ -107,6 +117,15 @@ export declare function listCourseAssignmentsByCourse(courseId: string): CourseA
 export declare function createGradingTask(task: GradingTask): GradingTask;
 export declare function listGradingTasksByTeacher(teacherEmail: string): GradingTask[];
 export declare function deleteGradingTask(id: string, teacherEmail: string): void;
+export declare function getPlannerPreferences(userEmail: string): PlannerPreferences;
+export declare function upsertPlannerPreferences(userEmail: string, update: {
+    studyWindowStartMin: number;
+    studyWindowEndMin: number;
+    maxSessionMin: number;
+    breakBetweenSessionsMin: number;
+    avoidLateNight: boolean;
+    coursePriorityWeights: Record<string, number>;
+}): PlannerPreferences;
 export declare function createHelpRequest(req: HelpRequest): HelpRequest;
 export interface HelpRequestFilter {
     subject?: string;

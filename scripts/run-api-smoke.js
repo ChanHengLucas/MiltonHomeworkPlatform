@@ -3,14 +3,25 @@
  * Runs API smoke tests: spawns API with test DB, runs smoke script, kills API.
  */
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..');
-const API_PORT = parseInt(process.env.API_SMOKE_PORT || '4100', 10);
+const API_PORT = parseInt(process.env.API_SMOKE_PORT || '4200', 10);
 const testDbPath = path.join(ROOT, 'data', 'test.db');
+
+function buildWorkspace(workspace) {
+  const result = spawnSync('npm', ['run', 'build', '-w', workspace], {
+    cwd: ROOT,
+    env: process.env,
+    stdio: 'inherit',
+  });
+  if (result.status !== 0) {
+    throw new Error(`Failed to build ${workspace}`);
+  }
+}
 
 function waitFor(url, maxAttempts = 30) {
   return new Promise((resolve, reject) => {
@@ -31,6 +42,9 @@ function waitFor(url, maxAttempts = 30) {
 }
 
 async function main() {
+  buildWorkspace('packages/core');
+  buildWorkspace('packages/db');
+
   for (const dbPath of [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`]) {
     try {
       fs.rmSync(dbPath, { force: true });
@@ -49,7 +63,7 @@ async function main() {
       MAX_ACTIVE_CLAIMS: '50',
       MAX_CLAIMS_PER_HOUR: '100',
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'inherit', 'inherit'],
   });
 
   process.on('SIGINT', () => apiProc.kill('SIGTERM'));

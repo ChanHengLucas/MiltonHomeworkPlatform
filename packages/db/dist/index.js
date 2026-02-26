@@ -24,6 +24,8 @@ exports.listCourseAssignmentsByCourse = listCourseAssignmentsByCourse;
 exports.createGradingTask = createGradingTask;
 exports.listGradingTasksByTeacher = listGradingTasksByTeacher;
 exports.deleteGradingTask = deleteGradingTask;
+exports.getPlannerPreferences = getPlannerPreferences;
+exports.upsertPlannerPreferences = upsertPlannerPreferences;
 exports.createHelpRequest = createHelpRequest;
 exports.listHelpRequests = listHelpRequests;
 exports.listHelpRequestsVisibleTo = listHelpRequestsVisibleTo;
@@ -254,6 +256,21 @@ const MIGRATIONS = [
         createdAt TEXT NOT NULL
       );
     `
+    },
+    {
+        id: '012_planner_preferences',
+        up: `
+      CREATE TABLE IF NOT EXISTS planner_preferences (
+        userEmail TEXT PRIMARY KEY,
+        studyWindowStartMin INTEGER NOT NULL DEFAULT 480,
+        studyWindowEndMin INTEGER NOT NULL DEFAULT 1320,
+        maxSessionMin INTEGER NOT NULL DEFAULT 45,
+        breakBetweenSessionsMin INTEGER NOT NULL DEFAULT 10,
+        avoidLateNight INTEGER NOT NULL DEFAULT 1,
+        coursePriorityWeightsJson TEXT,
+        updatedAt TEXT NOT NULL
+      );
+    `
     }
 ];
 function applyMigrations() {
@@ -411,6 +428,113 @@ function listGradingTasksByTeacher(teacherEmail) {
 function deleteGradingTask(id, teacherEmail) {
     const db = getDb();
     db.prepare('DELETE FROM grading_tasks WHERE id = ? AND teacherEmail = ?').run(id, teacherEmail);
+}
+const DEFAULT_PREFERENCES = {
+    studyWindowStartMin: 8 * 60,
+    studyWindowEndMin: 22 * 60,
+    maxSessionMin: 45,
+    breakBetweenSessionsMin: 10,
+    avoidLateNight: true,
+};
+function clampInt(value, min, max) {
+    return Math.min(max, Math.max(min, Math.round(value)));
+}
+function normalizeEmail(email) {
+    return email.toLowerCase().trim();
+}
+function parseCoursePriorityWeights(raw) {
+    if (!raw)
+        return {};
+    try {
+        const parsed = JSON.parse(raw);
+        const out = {};
+        for (const [course, weight] of Object.entries(parsed)) {
+            if (typeof course !== 'string')
+                continue;
+            if (typeof weight !== 'number' || !Number.isFinite(weight))
+                continue;
+            out[course.toLowerCase().trim()] = clampInt(weight, -5, 5);
+        }
+        return out;
+    }
+    catch {
+        return {};
+    }
+}
+function getPlannerPreferences(userEmail) {
+    const db = getDb();
+    const email = normalizeEmail(userEmail);
+    if (!email) {
+        return {
+            userEmail: '',
+            ...DEFAULT_PREFERENCES,
+            coursePriorityWeights: {},
+            updatedAt: new Date().toISOString(),
+        };
+    }
+    const row = db
+        .prepare(`SELECT userEmail, studyWindowStartMin, studyWindowEndMin, maxSessionMin, breakBetweenSessionsMin, avoidLateNight, coursePriorityWeightsJson, updatedAt
+       FROM planner_preferences
+       WHERE userEmail = ?`)
+        .get(email);
+    if (!row) {
+        return {
+            userEmail: email,
+            ...DEFAULT_PREFERENCES,
+            coursePriorityWeights: {},
+            updatedAt: new Date().toISOString(),
+        };
+    }
+    return {
+        userEmail: row.userEmail,
+        studyWindowStartMin: clampInt(row.studyWindowStartMin, 0, 1439),
+        studyWindowEndMin: clampInt(row.studyWindowEndMin, 1, 1440),
+        maxSessionMin: clampInt(row.maxSessionMin, 5, 180),
+        breakBetweenSessionsMin: clampInt(row.breakBetweenSessionsMin, 0, 120),
+        avoidLateNight: row.avoidLateNight === 1,
+        coursePriorityWeights: parseCoursePriorityWeights(row.coursePriorityWeightsJson),
+        updatedAt: row.updatedAt,
+    };
+}
+function upsertPlannerPreferences(userEmail, update) {
+    const db = getDb();
+    const email = normalizeEmail(userEmail);
+    const now = new Date().toISOString();
+    const studyWindowStartMin = clampInt(update.studyWindowStartMin, 0, 1439);
+    const studyWindowEndMin = clampInt(update.studyWindowEndMin, 1, 1440);
+    const maxSessionMin = clampInt(update.maxSessionMin, 5, 180);
+    const breakBetweenSessionsMin = clampInt(update.breakBetweenSessionsMin, 0, 120);
+    const normalizedWeights = {};
+    for (const [course, weight] of Object.entries(update.coursePriorityWeights || {})) {
+        const key = course.toLowerCase().trim();
+        if (!key)
+            continue;
+        if (typeof weight !== 'number' || !Number.isFinite(weight))
+            continue;
+        normalizedWeights[key] = clampInt(weight, -5, 5);
+    }
+    db.prepare(`INSERT INTO planner_preferences
+      (userEmail, studyWindowStartMin, studyWindowEndMin, maxSessionMin, breakBetweenSessionsMin, avoidLateNight, coursePriorityWeightsJson, updatedAt)
+     VALUES
+      (@userEmail, @studyWindowStartMin, @studyWindowEndMin, @maxSessionMin, @breakBetweenSessionsMin, @avoidLateNight, @coursePriorityWeightsJson, @updatedAt)
+     ON CONFLICT(userEmail) DO UPDATE SET
+      studyWindowStartMin = excluded.studyWindowStartMin,
+      studyWindowEndMin = excluded.studyWindowEndMin,
+      maxSessionMin = excluded.maxSessionMin,
+      breakBetweenSessionsMin = excluded.breakBetweenSessionsMin,
+      avoidLateNight = excluded.avoidLateNight,
+      coursePriorityWeightsJson = excluded.coursePriorityWeightsJson,
+      updatedAt = excluded.updatedAt`).run({
+        userEmail: email,
+        studyWindowStartMin,
+        studyWindowEndMin: Math.max(studyWindowEndMin, studyWindowStartMin + 1),
+        maxSessionMin,
+        breakBetweenSessionsMin,
+        avoidLateNight: update.avoidLateNight ? 1 : 0,
+        coursePriorityWeightsJson: JSON.stringify(normalizedWeights),
+        updatedAt: now,
+    });
+    return getPlannerPreferences(email);
 }
 // Support Hub repository
 function createHelpRequest(req) {

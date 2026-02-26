@@ -94,6 +94,6 @@ test.describe('Support hub operational', () => {
     await expect(page.locator('.ui-modal')).toContainText('Release claim');
     await page.locator('.ui-modal button.btn-danger').click();
 
-    await expect(page.locator('text=Claimed by')).not.toBeVisible();
+    await expect(page.getByText(/Claimed by:/).first()).not.toBeVisible();
   });
 });

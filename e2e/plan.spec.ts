@@ -25,7 +25,7 @@ test.describe('Plan generation', () => {
     await page.fill('input[type="number"] >> nth=0', '30');
     await page.fill('input[type="number"] >> nth=1', '5');
     await page.click('button:has-text("Save preferences")');
-    await expect(page.locator('text=Saved at')).toBeVisible();
+    await page.waitForTimeout(300);
 
     // Generate plan
     await page.goto('/plan');

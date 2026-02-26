@@ -19,11 +19,22 @@ export interface PlannerPlanSession {
     startMin: number;
     endMin: number;
 }
+export interface PlanPreferences {
+    preferredStudyWindow?: {
+        startMin: number;
+        endMin: number;
+    };
+    maxSessionMin?: number;
+    breakBetweenSessionsMin?: number;
+    avoidLateNight?: boolean;
+    coursePriorityWeights?: Record<string, number>;
+}
 export interface PlanRequest {
     assignments: Assignment[];
     availability: AvailabilityBlock[];
     sessionMin?: number;
     now?: string;
+    preferences?: PlanPreferences;
 }
 export interface PlanResult {
     sessions: PlannerPlanSession[];
