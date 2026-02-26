@@ -6,9 +6,10 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..');
-const API_PORT = 4000;
+const API_PORT = parseInt(process.env.API_SMOKE_PORT || '4100', 10);
 const testDbPath = path.join(ROOT, 'data', 'test.db');
 
 function waitFor(url, maxAttempts = 30) {
@@ -30,9 +31,24 @@ function waitFor(url, maxAttempts = 30) {
 }
 
 async function main() {
+  for (const dbPath of [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`]) {
+    try {
+      fs.rmSync(dbPath, { force: true });
+    } catch {
+      // ignore
+    }
+  }
+
   const apiProc = spawn('npm', ['run', 'dev', '--workspace', 'apps/api'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(API_PORT), DATABASE_FILE: testDbPath, NODE_ENV: 'development' },
+    env: {
+      ...process.env,
+      PORT: String(API_PORT),
+      DATABASE_FILE: testDbPath,
+      NODE_ENV: 'development',
+      MAX_ACTIVE_CLAIMS: '50',
+      MAX_CLAIMS_PER_HOUR: '100',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

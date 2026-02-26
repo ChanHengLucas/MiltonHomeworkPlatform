@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 
 import { api, type PlanResult, type Assignment } from '../api';
 import { useAppState } from '../context/AppContext';
@@ -20,7 +21,7 @@ function getDuration(startMin: number, endMin: number): number {
 }
 
 export function PlanPage() {
-  const { calendarBusyBlocks } = useAppState();
+  const { calendarBusyBlocks, calendarBusyUpdatedAt } = useAppState();
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -47,6 +48,7 @@ export function PlanPage() {
       const busyBlocks = calendarBusyBlocks.length > 0
         ? calendarBusyBlocks.map((b) => ({ startMs: b.startMs, endMs: b.endMs }))
         : undefined;
+      console.log('[Plan] Generating plan', { sessionMin, busyCount: busyBlocks?.length ?? 0 });
       const result = await api.createPlan(sessionMin, undefined, busyBlocks);
       setPlan(result);
       await loadAssignments();
@@ -94,6 +96,12 @@ export function PlanPage() {
           {loading ? 'Generating…' : 'Generate Plan'}
         </Button>
       </div>
+      <p className="form-hint" style={{ marginTop: 0, marginBottom: '0.25rem' }}>
+        {calendarBusyBlocks.length > 0
+          ? `Using ${calendarBusyBlocks.length} imported Google Calendar busy blocks${calendarBusyUpdatedAt ? ` (synced ${new Date(calendarBusyUpdatedAt).toLocaleTimeString()})` : ''}.`
+          : 'No calendar busy blocks imported yet.'}{' '}
+        <Link to="/availability" className="link">Import in Availability</Link>.
+      </p>
 
       {error && (
         <Callout variant="error" onRetry={handleGenerate}>

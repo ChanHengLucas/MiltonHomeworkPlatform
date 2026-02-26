@@ -7,10 +7,11 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..');
-const API_PORT = 4000;
-const VITE_PORT = 3000;
+const API_PORT = parseInt(process.env.E2E_API_PORT || '4100', 10);
+const VITE_PORT = parseInt(process.env.E2E_WEB_PORT || '3100', 10);
 const BASE_URL = `http://localhost:${VITE_PORT}`;
 const API_URL = `http://localhost:${API_PORT}`;
 const REQUEST_TIMEOUT_MS = 5000;
@@ -52,12 +53,22 @@ function waitFor(url, label, maxAttempts = 60) {
 async function main() {
   console.log('[E2E] Starting API server...');
   const testDbPath = path.join(ROOT, 'data', 'test.db');
+  for (const dbPath of [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`]) {
+    try {
+      fs.rmSync(dbPath, { force: true });
+    } catch {
+      // ignore
+    }
+  }
   const apiEnv = {
     ...process.env,
     PORT: String(API_PORT),
     DATABASE_FILE: testDbPath,
     NODE_ENV: 'development',
     MOCK_AUTH: '1',
+    FRONTEND_URL: BASE_URL,
+    MAX_ACTIVE_CLAIMS: '50',
+    MAX_CLAIMS_PER_HOUR: '100',
   };
 
   const apiProc = spawn('npm', ['run', 'dev', '--workspace', 'apps/api'], {
@@ -69,7 +80,14 @@ async function main() {
   console.log('[E2E] Starting Vite dev server...');
   const viteProc = spawn('npm', ['run', 'dev', '--workspace', 'apps/web'], {
     cwd: ROOT,
-    env: { ...process.env, NODE_ENV: 'development', E2E_TEST: '1', VITE_E2E_TEST: '1' },
+    env: {
+      ...process.env,
+      NODE_ENV: 'development',
+      E2E_TEST: '1',
+      VITE_E2E_TEST: '1',
+      VITE_PORT: String(VITE_PORT),
+      VITE_API_PROXY_TARGET: API_URL,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -96,7 +114,7 @@ async function main() {
   const pw = spawn('npx', ['playwright', 'test', '--project=chromium'], {
     cwd: ROOT,
     stdio: 'inherit',
-    env: { ...process.env, BASE_URL },
+    env: { ...process.env, BASE_URL, API_BASE: API_URL },
   });
 
   const code = await new Promise((resolve) => pw.on('close', resolve));

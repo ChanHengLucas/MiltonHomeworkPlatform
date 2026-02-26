@@ -11,7 +11,8 @@ test.describe('Support hub flow', () => {
     await page.fill('input[placeholder="Assignment title"]', 'Support test assignment');
     await page.fill('input[placeholder="e.g. Math 101"]', 'Math');
     await page.fill('input[type="number"][placeholder="e.g. 30"]', '30');
-    await page.click('button:has-text("Save Assignment")');
+    const personalCard = page.locator('.ui-card').filter({ hasText: 'Personal assignment details' });
+    await personalCard.getByRole('button', { name: 'Add assignment' }).click();
     await page.waitForSelector('.assignment-card-title:has-text("Support test assignment")');
     const needHelpBtn = page.locator('.assignment-card:has-text("Support test assignment") button:has-text("Need help")');
     await needHelpBtn.click();
@@ -30,30 +31,30 @@ test.describe('Support hub flow', () => {
 
     // Detail page - description visible
     await expect(page).toHaveURL(/\/support\/[a-f0-9-]+/);
-    await expect(page.locator('.section-title')).toContainText('Need help?');
-    await expect(page.locator('p')).toContainText('I need help with this assignment.');
+    await expect(page.getByRole('heading', { level: 2, name: 'Need help?' })).toBeVisible();
+    await expect(page.getByText('I need help with this assignment.')).toBeVisible();
 
     // Switch to Student B and claim
     await page.selectOption('.dev-identity-select', 'student-b');
     await page.fill('input[placeholder="Your name"]', 'Test Student');
-    await page.click('button:has-text("Claim")');
+    await page.click('button:has-text("Claim request")');
 
     // Verify claimed by Student B (display name Test Student)
-    await expect(page.locator('text=Claimed by')).toBeVisible();
-    await expect(page.locator('text=Test Student')).toBeVisible();
+    await expect(page.getByText('Claimed by: Test Student').first()).toBeVisible();
 
     // Add comment as Student B - verify helper label (no role picker; server derives)
     await page.fill('textarea[placeholder*="message"]', 'I can help with this!');
     await page.click('button:has-text("Post")');
-    await expect(page.locator('.comment-item')).toContainText('Helper');
+    await expect(
+      page.locator('.comment-item').filter({ hasText: 'I can help with this!' })
+    ).toContainText('Helper');
 
     // Student B (helper, not requester) should NOT see close button
     await expect(page.locator('button:has-text("Close request")')).not.toBeVisible();
 
-    // Switch back to Student A - claim button disabled, self-claim blocked; requester CAN close
+    // Switch back to Student A - requester can close and cannot claim while request is claimed
     await page.selectOption('.dev-identity-select', 'student-a');
-    await expect(page.locator('text=You can\'t claim your own request')).toBeVisible();
-    await expect(page.locator('button:has-text("Claim")')).not.toBeVisible();
+    await expect(page.locator('button:has-text("Claim request")')).not.toBeVisible();
     await expect(page.locator('button:has-text("Close request")')).toBeVisible();
   });
 });

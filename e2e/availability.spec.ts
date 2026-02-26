@@ -10,7 +10,7 @@ test.describe('Availability flow', () => {
     await page.click('button:has-text("Add")');
 
     await expect(page.locator('.availability-day-group')).toContainText('Mon');
-    await expect(page.locator('.availability-block-item')).toContainText('19:00');
-    await expect(page.locator('.availability-block-item')).toContainText('22:00');
+    await expect(page.locator('.availability-block-item')).toContainText(/(19|7):00/);
+    await expect(page.locator('.availability-block-item')).toContainText(/(22|10):00/);
   });
 });

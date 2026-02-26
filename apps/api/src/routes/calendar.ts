@@ -17,6 +17,15 @@ function getOAuthClient(): OAuth2Client {
   return new OAuth2Client(clientId, clientSecret, redirectUri);
 }
 
+function getStatusCodeFromError(err: unknown): number {
+  if (typeof err !== 'object' || !err) return 500;
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'number') return code;
+  const status = (err as { response?: { status?: unknown } }).response?.status;
+  if (typeof status === 'number') return status;
+  return 500;
+}
+
 export const calendarRouter = Router();
 
 calendarRouter.get('/busy', async (req: Request, res: Response) => {
@@ -30,6 +39,8 @@ calendarRouter.get('/busy', async (req: Request, res: Response) => {
   const cacheKey = `${userEmail}:${days}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() < cached.expires) {
+    console.log('[Calendar] Serving cached busy blocks', { userEmail, days, count: cached.data.length });
+    res.setHeader('X-Calendar-Cache', 'HIT');
     return res.json(cached.data);
   }
 
@@ -65,9 +76,18 @@ calendarRouter.get('/busy', async (req: Request, res: Response) => {
     }
 
     cache.set(cacheKey, { data: busy, expires: Date.now() + CACHE_TTL_MS });
+    console.log('[Calendar] Fetched busy blocks', { userEmail, days, count: busy.length });
+    res.setHeader('X-Calendar-Cache', 'MISS');
     res.json(busy);
   } catch (err) {
-    console.error('[Calendar] FreeBusy error', err);
-    res.status(500).json({ error: 'Failed to fetch calendar busy times.' });
+    const status = getStatusCodeFromError(err);
+    console.error('[Calendar] FreeBusy error', { status, err });
+    if (status === 401) {
+      return res.status(401).json({ error: 'Google session expired. Please sign in again to import calendar.' });
+    }
+    if (status === 403 || status === 429) {
+      return res.status(429).json({ error: 'Google Calendar quota limit reached. Try again in a few minutes.' });
+    }
+    res.status(500).json({ error: 'Failed to fetch calendar busy times. Please try again.' });
   }
 });

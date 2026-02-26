@@ -28,11 +28,12 @@ function formatBlockTime(label: string, startMin: number, endMin: number): strin
 }
 
 export function AvailabilityPage() {
-  const { setCalendarBusyBlocks } = useAppState();
+  const { calendarBusyBlocks, calendarBusyUpdatedAt, setCalendarBusyBlocks } = useAppState();
   const [blocks, setBlocks] = useState<AvailabilityBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
   const [startTime, setStartTime] = useState('19:00');
   const [endTime, setEndTime] = useState('22:00');
@@ -85,11 +86,16 @@ export function AvailabilityPage() {
     try {
       setImporting(true);
       setError(null);
+      setImportResult(null);
+      console.log('[Calendar] Importing busy times for next 7 days');
       const busy = await api.getCalendarBusy(7);
       setCalendarBusyBlocks(busy);
+      setImportResult(`Imported ${busy.length} busy blocks from Google Calendar (cached up to 5 minutes).`);
+      console.log('[Calendar] Busy import complete', { count: busy.length });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to import calendar';
       setError(msg);
+      setImportResult(null);
       console.error('[Planner] [API]', msg);
     } finally {
       setImporting(false);
@@ -160,6 +166,11 @@ export function AvailabilityPage() {
             </Button>
           </div>
         </div>
+        {importResult && (
+          <p className="form-hint" style={{ marginTop: '0.7rem', marginBottom: 0 }}>
+            {importResult}
+          </p>
+        )}
       </Card>
 
       {error && (
@@ -196,6 +207,36 @@ export function AvailabilityPage() {
           </div>
         )}
       </Card>
+
+      {calendarBusyBlocks.length > 0 && (
+        <Card>
+          <div className="split-header">
+            <h2 className="section-title" style={{ marginBottom: 0 }}>Imported busy times</h2>
+            {calendarBusyUpdatedAt && (
+              <span className="form-hint">
+                Last synced {new Date(calendarBusyUpdatedAt).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          <div className="assignment-list" style={{ marginTop: '0.75rem' }}>
+            {calendarBusyBlocks.slice(0, 12).map((busy, index) => (
+              <div key={`${busy.startMs}-${busy.endMs}-${index}`} className="assignment-card">
+                <div className="assignment-card-content">
+                  <div className="assignment-card-title">Busy ({busy.source})</div>
+                  <div className="assignment-card-meta">
+                    {new Date(busy.startMs).toLocaleString()} · {new Date(busy.endMs).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {calendarBusyBlocks.length > 12 && (
+            <p className="form-hint" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+              Showing 12 of {calendarBusyBlocks.length} blocks.
+            </p>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
