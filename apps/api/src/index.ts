@@ -16,6 +16,7 @@ import { insightsRouter } from './routes/insights';
 import { planRouter } from './routes/plan';
 import { requestsRouter } from './routes/requests';
 import { adminRouter } from './routes/admin';
+import { settingsRouter } from './routes/settings';
 import { errorHandler } from './middleware/errorHandler';
 import { identityMiddleware } from './middleware/identity';
 
@@ -76,6 +77,7 @@ app.use('/api/plan', planRouter);
 app.use('/api/requests', requestsRouter);
 app.use('/api/insights', insightsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/settings', settingsRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });

@@ -53,6 +53,7 @@ interface AppState {
   teacherEligible: boolean;
   suggestedClaimName: string;
   calendarBusyBlocks: CalendarBusyBlock[];
+  calendarBusyUpdatedAt: number | null;
   setCalendarBusyBlocks: (blocks: CalendarBusyBlock[]) => void;
 }
 
@@ -115,8 +116,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const [calendarBusyBlocks, setCalendarBusyBlocksState] = useState<CalendarBusyBlock[]>([]);
+  const [calendarBusyUpdatedAt, setCalendarBusyUpdatedAt] = useState<number | null>(null);
   const setCalendarBusyBlocks = useCallback((blocks: CalendarBusyBlock[]) => {
     setCalendarBusyBlocksState(blocks);
+    setCalendarBusyUpdatedAt(Date.now());
   }, []);
 
   const value = useMemo(
@@ -130,6 +133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       teacherEligible,
       suggestedClaimName,
       calendarBusyBlocks,
+      calendarBusyUpdatedAt,
       setCalendarBusyBlocks,
     }),
     [
@@ -142,6 +146,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       teacherEligible,
       suggestedClaimName,
       calendarBusyBlocks,
+      calendarBusyUpdatedAt,
     ]
   );
 

@@ -23,15 +23,26 @@ export interface PlannerPlanSession {
   endMin: number;
 }
 
+export interface PlanPreferences {
+  preferredStudyWindow?: {
+    startMin: number; // minutes from start of day (0-1439)
+    endMin: number; // minutes from start of day (1-1440)
+  };
+  maxSessionMin?: number;
+  breakBetweenSessionsMin?: number;
+  avoidLateNight?: boolean;
+  coursePriorityWeights?: Record<string, number>;
+}
+
 export interface PlanRequest {
   assignments: Assignment[];
   availability: AvailabilityBlock[];
   sessionMin?: number;
   now?: string; // ISO datetime used for urgency scoring
+  preferences?: PlanPreferences;
 }
 
 export interface PlanResult {
   sessions: PlannerPlanSession[];
   warnings: string[];
 }
-
