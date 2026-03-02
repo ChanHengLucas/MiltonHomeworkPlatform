@@ -8,6 +8,7 @@ const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const net = require('net');
 
 const ROOT = path.resolve(__dirname, '..');
 const API_PORT = parseInt(process.env.E2E_API_PORT || '4100', 10);
@@ -15,6 +16,23 @@ const VITE_PORT = parseInt(process.env.E2E_WEB_PORT || '3100', 10);
 const BASE_URL = `http://localhost:${VITE_PORT}`;
 const API_URL = `http://localhost:${API_PORT}`;
 const REQUEST_TIMEOUT_MS = 5000;
+
+function ensurePortAvailable(port, label) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        reject(new Error(`${label} port ${port} is already in use. Stop the existing process or set ${label === 'API' ? 'E2E_API_PORT' : 'E2E_WEB_PORT'}.`));
+        return;
+      }
+      reject(err);
+    });
+    server.listen(port, () => {
+      server.close(() => resolve());
+    });
+  });
+}
 
 function waitFor(url, label, maxAttempts = 60) {
   return new Promise((resolve, reject) => {
@@ -62,6 +80,9 @@ function buildWorkspace(workspace) {
 }
 
 async function main() {
+  await ensurePortAvailable(API_PORT, 'API');
+  await ensurePortAvailable(VITE_PORT, 'Web');
+
   buildWorkspace('packages/core');
   buildWorkspace('packages/db');
 

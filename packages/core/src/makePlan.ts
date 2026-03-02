@@ -9,7 +9,7 @@ import {
 import { computeUrgencyScore } from './urgencyScore';
 
 const MINUTES_PER_DAY = 24 * 60;
-const LATE_NIGHT_START_MIN = 22 * 60;
+const LATE_NIGHT_START_MIN = 23 * 60;
 
 interface Slot {
   startMin: number;

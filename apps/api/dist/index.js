@@ -20,8 +20,12 @@ const insights_1 = require("./routes/insights");
 const plan_1 = require("./routes/plan");
 const requests_1 = require("./routes/requests");
 const admin_1 = require("./routes/admin");
+const settings_1 = require("./routes/settings");
+const db_2 = require("./routes/db");
+const notifications_1 = require("./routes/notifications");
 const errorHandler_1 = require("./middleware/errorHandler");
 const identity_1 = require("./middleware/identity");
+const notifications_2 = require("./services/notifications");
 const logger = (0, pino_1.default)({
     level: process.env.LOG_LEVEL ?? 'info',
     transport: process.env.NODE_ENV === 'development'
@@ -62,7 +66,15 @@ app.use((0, pino_http_1.default)({
     customSuccessMessage: (req, res) => `${req.method} ${req.url} ${res.statusCode}`,
     customErrorMessage: (req, res, err) => `${req.method} ${req.url} ${res.statusCode} - ${err?.message ?? 'Unknown error'}`,
 }));
+app.use((req, res, next) => {
+    const requestId = String(req.id ?? '');
+    if (requestId) {
+        res.setHeader('X-Request-Id', requestId);
+    }
+    next();
+});
 app.use('/auth', auth_1.authRouter);
+app.use('/api/db', db_2.dbRouter);
 app.use('/api/calendar', calendar_1.calendarRouter);
 app.use('/api/assignments', assignments_1.assignmentsRouter);
 app.use('/api/teacher', teacher_1.teacherRouter);
@@ -72,17 +84,20 @@ app.use('/api/plan', plan_1.planRouter);
 app.use('/api/requests', requests_1.requestsRouter);
 app.use('/api/insights', insights_1.insightsRouter);
 app.use('/api/admin', admin_1.adminRouter);
+app.use('/api/settings', settings_1.settingsRouter);
+app.use('/api/notifications', notifications_1.notificationsRouter);
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 app.use((0, errorHandler_1.errorHandler)(logger));
 const CLEANUP_TTL_DAYS = parseInt(process.env.CLEANUP_TTL_DAYS ?? '7', 10) || 7;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const DUE_REMINDER_INTERVAL_MS = parseInt(process.env.DUE_REMINDER_INTERVAL_MS ?? '600000', 10) || 600000;
 function start() {
     logger.info('[API] Starting...');
     try {
         (0, db_1.initDb)();
-        logger.info('[API] Database initialized');
+        logger.info({ dbFile: (0, db_1.getDatabaseFilePath)() }, '[API] Database initialized');
     }
     catch (err) {
         logger.error({ err }, '[API] Failed to initialize database');
@@ -97,6 +112,21 @@ function start() {
         }
     }, CLEANUP_INTERVAL_MS);
     logger.info({ ttlDays: CLEANUP_TTL_DAYS }, '[API] Cleanup job scheduled');
+    try {
+        (0, notifications_2.runDueReminderScan)(logger);
+    }
+    catch (err) {
+        logger.error({ err }, '[API] Initial due-reminder scan failed');
+    }
+    setInterval(() => {
+        try {
+            (0, notifications_2.runDueReminderScan)(logger);
+        }
+        catch (err) {
+            logger.error({ err }, '[API] Due-reminder job failed');
+        }
+    }, DUE_REMINDER_INTERVAL_MS);
+    logger.info({ intervalMs: DUE_REMINDER_INTERVAL_MS }, '[API] Due-reminder job scheduled');
     app.listen(PORT, () => {
         logger.info({ port: PORT }, '[API] API listening on port %s', PORT);
         // eslint-disable-next-line no-console

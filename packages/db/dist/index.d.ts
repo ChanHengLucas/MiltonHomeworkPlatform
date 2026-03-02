@@ -8,6 +8,11 @@ export interface HelpRequest {
     urgency: 'low' | 'med' | 'high';
     status: 'open' | 'claimed' | 'closed';
     createdAt: string;
+    claimMode?: 'any' | 'teacher_only' | null;
+    meetingAbout?: string | null;
+    meetingLocation?: string | null;
+    meetingLink?: string | null;
+    proposedTimes?: string | null;
     claimedBy?: string | null;
     claimedByEmail?: string | null;
     claimedAt?: string | null;
@@ -54,9 +59,16 @@ export interface RequestsSummaryRow {
     status: string;
     count: number;
 }
+export declare function getDatabaseFilePath(): string;
 export declare function getDb(): Database;
 export declare function applyMigrations(): void;
 export declare function initDb(): Database;
+export interface DbHealthCheckResult {
+    ok: boolean;
+    dbFile: string;
+    checkedAt: string;
+}
+export declare function runDbHealthCheck(): DbHealthCheckResult;
 export declare function listAssignments(): Assignment[];
 export declare function createAssignment(assignment: Assignment): Assignment;
 export declare function updateAssignmentCompletion(id: string, completed: boolean): void;
@@ -67,6 +79,7 @@ export declare function deleteAvailabilityBlock(id: string): void;
 export interface Course {
     id: string;
     name: string;
+    courseCode: string;
     teacherEmail: string;
     createdAt: string;
 }
@@ -93,6 +106,55 @@ export interface GradingTask {
     estMinutes: number;
     createdAt: string;
 }
+export interface CourseAnnouncement {
+    id: string;
+    courseId: string;
+    title: string;
+    body: string;
+    createdByEmail: string;
+    createdAt: string;
+}
+export type NotificationType = 'assignment_posted' | 'request_claimed' | 'request_unclaimed' | 'request_closed' | 'request_comment' | 'due_reminder_24h' | 'due_reminder_6h';
+export interface NotificationRecord {
+    id: string;
+    userEmail: string;
+    type: NotificationType;
+    payload: Record<string, unknown> | null;
+    dedupeKey: string | null;
+    createdAt: string;
+    readAt: string | null;
+}
+export interface CourseFeedbackSubmission {
+    id: string;
+    courseId: string;
+    studentEmail: string;
+    rating: number;
+    comment: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface CourseFeedbackSummary {
+    courseId: string;
+    totalResponses: number;
+    averageRating: number | null;
+    ratingBreakdown: {
+        rating: number;
+        count: number;
+    }[];
+    recentComments: {
+        rating: number;
+        comment: string;
+        createdAt: string;
+    }[];
+}
+export interface DueReminderCandidate {
+    assignmentId: string;
+    courseId: string;
+    courseName: string;
+    title: string;
+    dueAtMs: number;
+    studentEmail: string;
+}
 export interface PlannerPreferences {
     userEmail: string;
     studyWindowStartMin: number;
@@ -106,14 +168,19 @@ export interface PlannerPreferences {
 export declare function createCourse(course: Course): Course;
 export declare function listCoursesByTeacher(teacherEmail: string): Course[];
 export declare function getCourse(id: string): Course | null;
+export declare function getCourseByCode(code: string): Course | null;
 export declare function addCourseMember(courseId: string, studentEmail: string): void;
 export declare function listCourseMembers(courseId: string): string[];
+export declare function isStudentInCourse(courseId: string, studentEmail: string): boolean;
+export declare function listCoursesByStudent(studentEmail: string): Course[];
 export declare function createCourseAssignment(a: CourseAssignment): CourseAssignment;
 export interface CourseAssignmentWithCourse extends CourseAssignment {
     courseName: string;
 }
 export declare function listCourseAssignmentsForStudent(studentEmail: string): CourseAssignmentWithCourse[];
 export declare function listCourseAssignmentsByCourse(courseId: string): CourseAssignment[];
+export declare function createCourseAnnouncement(announcement: CourseAnnouncement): CourseAnnouncement;
+export declare function listCourseAnnouncementsByCourse(courseId: string): CourseAnnouncement[];
 export declare function createGradingTask(task: GradingTask): GradingTask;
 export declare function listGradingTasksByTeacher(teacherEmail: string): GradingTask[];
 export declare function deleteGradingTask(id: string, teacherEmail: string): void;
@@ -126,6 +193,21 @@ export declare function upsertPlannerPreferences(userEmail: string, update: {
     avoidLateNight: boolean;
     coursePriorityWeights: Record<string, number>;
 }): PlannerPreferences;
+export declare function createNotification(input: {
+    userEmail: string;
+    type: NotificationType;
+    payload?: Record<string, unknown> | null;
+    dedupeKey?: string | null;
+    createdAt?: string;
+}): NotificationRecord | null;
+export declare function listNotificationsByUser(userEmail: string, limit?: number): NotificationRecord[];
+export declare function getUnreadNotificationCount(userEmail: string): number;
+export declare function markNotificationRead(userEmail: string, notificationId: string): boolean;
+export declare function markAllNotificationsRead(userEmail: string): number;
+export declare function listCourseAssignmentDueReminderCandidates(minDueAtMs: number, maxDueAtMs: number): DueReminderCandidate[];
+export declare function upsertCourseFeedback(courseId: string, studentEmail: string, rating: number, comment?: string | null): CourseFeedbackSubmission;
+export declare function getCourseFeedbackByStudent(courseId: string, studentEmail: string): CourseFeedbackSubmission | null;
+export declare function getCourseFeedbackSummary(courseId: string): CourseFeedbackSummary;
 export declare function createHelpRequest(req: HelpRequest): HelpRequest;
 export interface HelpRequestFilter {
     subject?: string;

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, type PlanResult, type Assignment } from '../api';
 import { useAppState } from '../context/AppContext';
 import { Button, Card, Callout } from '../components/ui';
+import { formatDueDate } from '../utils/datetime';
 
 const MINUTES_PER_DAY = 24 * 60;
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -75,6 +76,37 @@ export function PlanPage() {
     {} as Record<number, { assignmentId: string; startMin: number; endMin: number }[]>,
   );
 
+  const overloadWarning = plan?.warnings.find((w) => w.includes('Insufficient time for')) ?? null;
+  const overloadTitleMatch = overloadWarning?.match(/"(.+?)"/);
+  const overloadTitle = overloadTitleMatch?.[1] ?? null;
+  const overloadAssignment = overloadTitle
+    ? assignments.find((assignment) => assignment.title === overloadTitle) ?? null
+    : null;
+  const extensionMailto = overloadAssignment
+    ? (() => {
+      const subject = `Extension request: ${overloadAssignment.title}`;
+      const due = overloadAssignment.dueAt ? formatDueDate(overloadAssignment.dueAt) : 'No due date listed';
+      const body = [
+        'Hello,',
+        '',
+        `I am requesting an extension for "${overloadAssignment.title}" in ${overloadAssignment.course}.`,
+        `Current due date: ${due}.`,
+        '',
+        'Reason:',
+        '- My current planner shows an overload this week and not enough available study time.',
+        '- I have already started the assignment and need additional time to complete quality work.',
+        '',
+        'Requested new due date:',
+        '[Please suggest date]',
+        '',
+        'Thank you,',
+        '[Your name]',
+      ].join('\n');
+      const params = new URLSearchParams({ subject, body });
+      return `mailto:?${params.toString()}`;
+    })()
+    : null;
+
   return (
     <div className="page">
       <h1 className="page-title">Plan</h1>
@@ -116,6 +148,13 @@ export function PlanPage() {
               {plan.warnings.map((w, i) => (
                 <p key={i}>{w}</p>
               ))}
+              {extensionMailto && (
+                <p style={{ marginTop: '0.85rem' }}>
+                  <a className="link" href={extensionMailto}>
+                    Request extension email draft
+                  </a>
+                </p>
+              )}
             </div>
           )}
           {plan.sessions.length === 0 ? (

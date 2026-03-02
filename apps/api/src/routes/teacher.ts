@@ -4,14 +4,19 @@ import { z } from 'zod';
 import {
   createCourse,
   listCoursesByTeacher,
+  getCourseByCode,
   getCourse,
   addCourseMember,
   listCourseMembers,
   createCourseAssignment,
   listCourseAssignmentsByCourse,
+  createCourseAnnouncement,
+  listCourseAnnouncementsByCourse,
   createGradingTask,
   listGradingTasksByTeacher,
   deleteGradingTask,
+  createNotification,
+  getCourseFeedbackSummary,
 } from '@planner/db';
 import { requireTeacher } from '../middleware/identity';
 
@@ -38,6 +43,30 @@ const createGradingTaskSchema = z.object({
   estMinutes: z.number().int().min(5, 'Estimated time must be at least 5 minutes'),
 });
 
+const createAnnouncementSchema = z.object({
+  title: z.string().min(1, 'Announcement title is required'),
+  body: z.string().min(1, 'Announcement body is required'),
+});
+
+function generateCourseCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+function createUniqueCourseCode(maxAttempts = 20): string {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const code = generateCourseCode();
+    if (!getCourseByCode(code)) {
+      return code;
+    }
+  }
+  throw new Error('Failed to generate unique course code');
+}
+
 export const teacherRouter = Router();
 
 teacherRouter.use(requireTeacher);
@@ -53,6 +82,7 @@ teacherRouter.post('/courses', (req: Request, res, next) => {
   const course = {
     id: randomUUID(),
     name: parsed.data.name,
+    courseCode: createUniqueCourseCode(),
     teacherEmail,
     createdAt: new Date().toISOString(),
   };
@@ -115,6 +145,28 @@ teacherRouter.post('/assignments', (req: Request, res, next) => {
     createdAt: new Date().toISOString(),
   };
   createCourseAssignment(a);
+  const members = listCourseMembers(course.id);
+  for (const studentEmail of members) {
+    try {
+      createNotification({
+        userEmail: studentEmail,
+        type: 'assignment_posted',
+        dedupeKey: `assignment_posted:${a.id}:${studentEmail.toLowerCase().trim()}`,
+        payload: {
+          assignmentId: a.id,
+          courseId: course.id,
+          courseName: course.name,
+          title: a.title,
+          dueAtMs: a.dueAtMs,
+        },
+      });
+    } catch (err) {
+      const log = (req as Request & { log?: { warn: (o: object, msg: string) => void } }).log;
+      if (log) {
+        log.warn({ err, courseId: course.id, studentEmail }, '[Teacher] Failed to create assignment notification');
+      }
+    }
+  }
   res.status(201).json(a);
 });
 
@@ -125,6 +177,46 @@ teacherRouter.get('/courses/:id/assignments', (req: Request, res) => {
   }
   const assignments = listCourseAssignmentsByCourse(course.id);
   res.json(assignments);
+});
+
+teacherRouter.post('/courses/:id/announcements', (req: Request, res, next) => {
+  const course = getCourse(req.params.id);
+  if (!course || course.teacherEmail !== req.user!.email) {
+    return res.status(404).json({ error: 'Course not found' });
+  }
+  const parsed = createAnnouncementSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const err = new Error(parsed.error.errors.map((e) => e.message).join('; ')) as Error & { statusCode?: number };
+    err.statusCode = 400;
+    return next(err);
+  }
+  const announcement = createCourseAnnouncement({
+    id: randomUUID(),
+    courseId: course.id,
+    title: parsed.data.title.trim(),
+    body: parsed.data.body.trim(),
+    createdByEmail: req.user!.email,
+    createdAt: new Date().toISOString(),
+  });
+  res.status(201).json(announcement);
+});
+
+teacherRouter.get('/courses/:id/announcements', (req: Request, res) => {
+  const course = getCourse(req.params.id);
+  if (!course || course.teacherEmail !== req.user!.email) {
+    return res.status(404).json({ error: 'Course not found' });
+  }
+  const announcements = listCourseAnnouncementsByCourse(course.id);
+  res.json(announcements);
+});
+
+teacherRouter.get('/courses/:id/feedback', (req: Request, res) => {
+  const course = getCourse(req.params.id);
+  if (!course || course.teacherEmail !== req.user!.email) {
+    return res.status(404).json({ error: 'Course not found' });
+  }
+  const summary = getCourseFeedbackSummary(course.id);
+  res.json(summary);
 });
 
 // Grading tasks

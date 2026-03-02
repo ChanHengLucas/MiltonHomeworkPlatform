@@ -16,6 +16,17 @@ function getOAuthClient() {
     const redirectUri = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/google/callback`;
     return new google_auth_library_1.OAuth2Client(clientId, clientSecret, redirectUri);
 }
+function getStatusCodeFromError(err) {
+    if (typeof err !== 'object' || !err)
+        return 500;
+    const code = err.code;
+    if (typeof code === 'number')
+        return code;
+    const status = err.response?.status;
+    if (typeof status === 'number')
+        return status;
+    return 500;
+}
 exports.calendarRouter = (0, express_1.Router)();
 exports.calendarRouter.get('/busy', async (req, res) => {
     const tokens = getTokens(req);
@@ -27,6 +38,8 @@ exports.calendarRouter.get('/busy', async (req, res) => {
     const cacheKey = `${userEmail}:${days}`;
     const cached = cache.get(cacheKey);
     if (cached && Date.now() < cached.expires) {
+        console.log('[Calendar] Serving cached busy blocks', { userEmail, days, count: cached.data.length });
+        res.setHeader('X-Calendar-Cache', 'HIT');
         return res.json(cached.data);
     }
     try {
@@ -57,10 +70,19 @@ exports.calendarRouter.get('/busy', async (req, res) => {
             }
         }
         cache.set(cacheKey, { data: busy, expires: Date.now() + CACHE_TTL_MS });
+        console.log('[Calendar] Fetched busy blocks', { userEmail, days, count: busy.length });
+        res.setHeader('X-Calendar-Cache', 'MISS');
         res.json(busy);
     }
     catch (err) {
-        console.error('[Calendar] FreeBusy error', err);
-        res.status(500).json({ error: 'Failed to fetch calendar busy times.' });
+        const status = getStatusCodeFromError(err);
+        console.error('[Calendar] FreeBusy error', { status, err });
+        if (status === 401) {
+            return res.status(401).json({ error: 'Google session expired. Please sign in again to import calendar.' });
+        }
+        if (status === 403 || status === 429) {
+            return res.status(429).json({ error: 'Google Calendar quota limit reached. Try again in a few minutes.' });
+        }
+        res.status(500).json({ error: 'Failed to fetch calendar busy times. Please try again.' });
     }
 });

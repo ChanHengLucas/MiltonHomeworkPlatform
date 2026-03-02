@@ -15,6 +15,8 @@ Monorepo for a school planner + support hub:
 - Support Hub claim/unclaim/close/report flows with visibility rules
 - Teacher-only Insights and teacher-only dashboard routes
 - Server-backed planner preferences (study window, max session, breaks, late-night avoidance, optional course weights)
+- In-app notifications (assignment posts, support lifecycle updates, comments, due reminders) with read/unread state
+- Anonymous course feedback (student submission, teacher aggregate view)
 
 ## Quick Start (Dev)
 
@@ -83,6 +85,29 @@ Planner uses these rules on every `/api/plan` call.
 - Imported busy blocks are shown in Availability and applied in Plan generation
 - Error messages are explicit for auth/session expiry and quota limits
 
+## Notifications
+
+- Endpoints:
+  - `GET /api/notifications`
+  - `GET /api/notifications/unread-count`
+  - `POST /api/notifications/:id/read`
+  - `POST /api/notifications/read-all`
+- Events covered:
+  - course assignment posted
+  - support request claimed/unclaimed/closed
+  - new support comment on related requests
+  - due reminders (24h / 6h) via periodic server scan
+- UI:
+  - header bell + quick panel
+  - full `/notifications` page
+
+## Course Feedback
+
+- Student:
+  - submit anonymous feedback in `Courses` (rating 1-5 + optional comment)
+- Teacher:
+  - view aggregated feedback stats and recent comments per course in `Courses`
+
 ## Build Notes
 
 Web production build is stable:
@@ -120,3 +145,12 @@ npx playwright install --with-deps chromium
 4. Calendar import errors:
    - Re-auth with Google if session expired.
    - Retry later on quota/rate-limit responses.
+5. SQLite “disk I/O error” on writes:
+   - Check API startup log for the resolved DB file path (`dbFile`).
+   - Ensure the DB directory exists and is writable by your user.
+   - Use `GET /api/db/health` to run a write/read DB probe.
+   - If DB files are corrupted, stop servers and reset safely:
+   ```bash
+   rm -f data/app.db data/app.db-wal data/app.db-shm
+   ```
+   - Restart API and recreate data.

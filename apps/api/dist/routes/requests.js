@@ -14,6 +14,11 @@ const createBodySchema = zod_1.z.object({
     subject: zod_1.z.string().min(1, 'Subject is required'),
     urgency: zod_1.z.enum(['low', 'med', 'high']),
     linkedAssignmentId: zod_1.z.string().uuid().optional().nullable(),
+    claimMode: zod_1.z.enum(['any', 'teacher_only']).default('any'),
+    meetingAbout: zod_1.z.string().max(240).optional().nullable(),
+    meetingLocation: zod_1.z.string().max(240).optional().nullable(),
+    meetingLink: zod_1.z.string().url('Meeting link must be a valid URL').max(400).optional().nullable(),
+    proposedTimes: zod_1.z.string().max(1000).optional().nullable(),
 });
 const claimBodySchema = zod_1.z.object({
     claimedBy: zod_1.z.string().min(1, 'claimedBy is required'),
@@ -26,9 +31,14 @@ const reportBodySchema = zod_1.z.object({
     details: zod_1.z.string().optional(),
 });
 function getIdentity(req) {
+    const requestUserEmail = (req.user?.email || '').trim();
+    const requestUserName = (req.user?.name || '').trim();
     const email = req.headers['x-user-email']?.trim() || '';
     const name = req.headers['x-user-name']?.trim() || '';
-    return { email, name };
+    return {
+        email: requestUserEmail || email,
+        name: requestUserName || name,
+    };
 }
 function displayNameFromEmail(email) {
     const trimmed = email.trim();
@@ -36,6 +46,24 @@ function displayNameFromEmail(email) {
         return '';
     const local = trimmed.slice(0, trimmed.indexOf('@'));
     return local || '';
+}
+function notifyUser(req, userEmail, type, payload) {
+    const normalized = (userEmail || '').toLowerCase().trim();
+    if (!normalized)
+        return;
+    try {
+        (0, db_1.createNotification)({
+            userEmail: normalized,
+            type,
+            payload,
+        });
+    }
+    catch (err) {
+        const log = req.log;
+        if (log) {
+            log.warn({ err, userEmail: normalized, type }, '[API] Failed to create request notification');
+        }
+    }
 }
 function canUserSeeRequest(req, userEmail) {
     const u = userEmail.toLowerCase().trim();
@@ -106,6 +134,11 @@ exports.requestsRouter.post('/', (req, res, next) => {
         urgency: data.urgency,
         status: 'open',
         createdAt: new Date().toISOString(),
+        claimMode: data.claimMode,
+        meetingAbout: data.meetingAbout?.trim() || null,
+        meetingLocation: data.meetingLocation?.trim() || null,
+        meetingLink: data.meetingLink?.trim() || null,
+        proposedTimes: data.proposedTimes?.trim() || null,
         claimedBy: null,
         claimedByEmail: null,
         linkedAssignmentId: data.linkedAssignmentId ?? null,
@@ -139,6 +172,13 @@ exports.requestsRouter.post('/:id/claim', (req, res, next) => {
             log.warn({ requestId: req.params.id }, '[API] Self-claim rejected');
         return res.status(400).json({ error: "You can't claim your own request." });
     }
+    if (request.claimMode === 'teacher_only' && (!claimantEmail || !(0, identity_1.isTeacherEligible)(claimantEmail))) {
+        const log = req.log;
+        if (log) {
+            log.warn({ requestId: req.params.id, claimantEmail }, '[API] Claim rejected by teacher-only mode');
+        }
+        return res.status(403).json({ error: 'This request is restricted to teacher/tutor claims.' });
+    }
     if ((0, db_1.isBlocked)(claimantEmail)) {
         return res.status(403).json({ error: 'Your account is temporarily blocked from claiming requests.' });
     }
@@ -166,6 +206,15 @@ exports.requestsRouter.post('/:id/claim', (req, res, next) => {
     const log = req.log;
     if (log)
         log.info({ requestId: req.params.id, claimedBy: parsed.data.claimedBy }, '[API] Request claimed');
+    const requesterEmail = (updated.createdByEmail || '').toLowerCase().trim();
+    if (requesterEmail && requesterEmail !== claimantEmail) {
+        notifyUser(req, requesterEmail, 'request_claimed', {
+            requestId: updated.id,
+            title: updated.title,
+            claimedBy: parsed.data.claimedBy,
+            claimedByEmail: claimantEmail || null,
+        });
+    }
     res.json(updated);
 });
 exports.requestsRouter.post('/:id/unclaim', (req, res, next) => {
@@ -194,6 +243,19 @@ exports.requestsRouter.post('/:id/unclaim', (req, res, next) => {
         err.statusCode = 404;
         return next(err);
     }
+    const recipients = new Set();
+    if (creatorEmail)
+        recipients.add(creatorEmail);
+    if (claimerEmail)
+        recipients.add(claimerEmail);
+    recipients.delete(userEmail);
+    for (const recipient of recipients) {
+        notifyUser(req, recipient, 'request_unclaimed', {
+            requestId: updated.id,
+            title: updated.title,
+            byEmail: userEmail || null,
+        });
+    }
     res.json(updated);
 });
 exports.requestsRouter.post('/:id/close', (req, res, next) => {
@@ -216,6 +278,20 @@ exports.requestsRouter.post('/:id/close', (req, res, next) => {
         const err = new Error('Request not found');
         err.statusCode = 404;
         return next(err);
+    }
+    const claimerEmail = (request.claimedByEmail || '').toLowerCase().trim();
+    const recipients = new Set();
+    if (creatorEmail)
+        recipients.add(creatorEmail);
+    if (claimerEmail)
+        recipients.add(claimerEmail);
+    recipients.delete(userEmail);
+    for (const recipient of recipients) {
+        notifyUser(req, recipient, 'request_closed', {
+            requestId: updated.id,
+            title: updated.title,
+            byEmail: userEmail || null,
+        });
     }
     res.json(updated);
 });
@@ -275,6 +351,21 @@ exports.requestsRouter.post('/:id/comments', (req, res, next) => {
         createdAt: new Date().toISOString(),
     };
     (0, db_1.addComment)(comment);
+    const recipients = new Set();
+    if (creatorEmail)
+        recipients.add(creatorEmail);
+    if (claimedByEmail)
+        recipients.add(claimedByEmail);
+    recipients.delete(commenterEmail);
+    for (const recipient of recipients) {
+        notifyUser(req, recipient, 'request_comment', {
+            requestId: request.id,
+            title: request.title,
+            byEmail: commenterEmail || null,
+            byName: commenterName || null,
+            commentPreview: parsed.data.body.slice(0, 160),
+        });
+    }
     res.status(201).json(comment);
 });
 exports.requestsRouter.post('/:id/report', (req, res, next) => {

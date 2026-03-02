@@ -96,4 +96,48 @@ test.describe('Support hub operational', () => {
 
     await expect(page.getByText(/Claimed by:/).first()).not.toBeVisible();
   });
+
+  test('teacher-only claim mode blocks student claims', async ({ page, request }) => {
+    await page.goto('/support');
+    await page.selectOption('.dev-identity-select', 'student-a');
+    await page.fill('input[placeholder*="summary"]', 'Teacher-only support request');
+    await page.fill('textarea[placeholder*="detail"]', 'Only teachers should be able to claim this.');
+    await page.fill('input[placeholder*="Math"]', 'Math');
+    await page.selectOption('select:has(option[value="teacher_only"])', 'teacher_only');
+    await page.click('button:has-text("Create Request")');
+
+    const card = page.locator('.request-card:has-text("Teacher-only support request")').first();
+    await expect(card).toBeVisible();
+
+    // Switch away from requester so restriction messaging is shown instead of own-request messaging.
+    await page.selectOption('.dev-identity-select', 'student-b');
+    await card.click();
+    await expect(page.getByText('restricted to teacher/tutor claims')).toBeVisible();
+
+    const requestUrl = page.url();
+    const requestId = requestUrl.split('/').pop() || '';
+    expect(requestId).toMatch(/[a-f0-9-]{36}/);
+
+    await expect(page.locator('button:has-text("Claim request")')).not.toBeVisible();
+
+    const blockedClaim = await request.post(`/api/requests/${requestId}/claim`, {
+      headers: {
+        'content-type': 'application/json',
+        'x-user-email': 'test34@milton.edu',
+        'x-user-name': 'Test Student',
+      },
+      data: { claimedBy: 'Test Student' },
+    });
+    expect(blockedClaim.status()).toBe(403);
+
+    const teacherClaim = await request.post(`/api/requests/${requestId}/claim`, {
+      headers: {
+        'content-type': 'application/json',
+        'x-user-email': 'hales@milton.edu',
+        'x-user-name': 'Mr. Hales',
+      },
+      data: { claimedBy: 'Mr. Hales' },
+    });
+    expect(teacherClaim.ok()).toBeTruthy();
+  });
 });

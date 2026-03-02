@@ -238,7 +238,7 @@ export function SettingsPage() {
                   }))
                 }
               />
-              <span>Avoid late-night sessions (after 10:00 PM)</span>
+              <span>Avoid late-night sessions (after 11:00 PM)</span>
             </label>
             <div className="form-actions">
               <Button onClick={handleSavePreferences} disabled={savingPrefs}>

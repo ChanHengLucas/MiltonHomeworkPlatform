@@ -50,6 +50,15 @@ async function run() {
     console.log('PASS: /api/health');
   }
 
+  // DB health probe
+  const dbHealth = await request('GET', '/api/db/health');
+  if (dbHealth.status !== 200 || !dbHealth.data?.ok || !dbHealth.data?.dbFile) {
+    console.error('FAIL: /api/db/health', dbHealth.status, dbHealth.data);
+    failed++;
+  } else {
+    console.log('PASS: /api/db/health');
+  }
+
   // Create assignment
   const createA = await request('POST', '/api/assignments', {
     course: 'Smoke',
@@ -98,6 +107,37 @@ async function run() {
     failed++;
   }
 
+  // Teacher-only request claim restriction
+  const createRestricted = await request(
+    'POST',
+    '/api/requests',
+    {
+      title: 'Teacher only request',
+      description: 'Claim restriction smoke test',
+      subject: 'Math',
+      urgency: 'med',
+      claimMode: 'teacher_only',
+    },
+    { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+  );
+  if (createRestricted.status !== 201 || !createRestricted.data?.id) {
+    console.error('FAIL: create teacher-only request');
+    failed++;
+  } else {
+    const blocked = await request(
+      'POST',
+      `/api/requests/${createRestricted.data.id}/claim`,
+      { claimedBy: 'Test Student' },
+      { 'x-user-email': 'test34@milton.edu', 'x-user-name': 'Test Student' }
+    );
+    if (blocked.status !== 403) {
+      console.error('FAIL: teacher-only claim should block student', blocked.status, blocked.data);
+      failed++;
+    } else {
+      console.log('PASS: teacher-only claim restriction');
+    }
+  }
+
   const hasCreator = reqId && createR.data?.createdByEmail;
   if (!hasCreator) {
     console.log('SKIP: self-claim (createdByEmail not set - ensure X-User-Email header is sent)');
@@ -132,6 +172,90 @@ async function run() {
     failed++;
   } else {
     console.log('PASS: claim as Student B');
+  }
+
+  // Course assignment notification + feedback summary
+  const suffix = Date.now();
+  const createCourse = await request(
+    'POST',
+    '/api/teacher/courses',
+    { name: `Smoke Course ${suffix}` },
+    { 'x-user-email': 'hales@milton.edu', 'x-user-name': 'Mr. Hales' }
+  );
+  if (createCourse.status !== 201 || !createCourse.data?.id || !createCourse.data?.courseCode) {
+    console.error('FAIL: create teacher course for notifications/feedback', createCourse.status, createCourse.data);
+    failed++;
+  } else {
+    const joinByCode = await request(
+      'POST',
+      '/api/student/courses/join-code',
+      { courseCode: createCourse.data.courseCode },
+      { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+    );
+    if (joinByCode.status !== 200) {
+      console.error('FAIL: join course by code', joinByCode.status, joinByCode.data);
+      failed++;
+    } else {
+      const postAssignment = await request(
+        'POST',
+        '/api/teacher/assignments',
+        {
+          courseId: createCourse.data.id,
+          title: `Notification Assignment ${suffix}`,
+          dueAtMs: Date.now() + 72 * 60 * 60 * 1000,
+          estMinutes: 30,
+          type: 'homework',
+        },
+        { 'x-user-email': 'hales@milton.edu', 'x-user-name': 'Mr. Hales' }
+      );
+      if (postAssignment.status !== 201) {
+        console.error('FAIL: post assignment for notification', postAssignment.status, postAssignment.data);
+        failed++;
+      } else {
+        const notifications = await request(
+          'GET',
+          '/api/notifications?limit=20',
+          null,
+          { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+        );
+        const hasAssignmentNotification = notifications.status === 200
+          && Array.isArray(notifications.data)
+          && notifications.data.some((n) => n.type === 'assignment_posted');
+        if (!hasAssignmentNotification) {
+          console.error('FAIL: assignment notification missing', notifications.status, notifications.data);
+          failed++;
+        } else {
+          console.log('PASS: assignment notification created');
+        }
+      }
+
+      const submitFeedback = await request(
+        'POST',
+        `/api/student/courses/${createCourse.data.id}/feedback`,
+        { rating: 4, comment: 'Good pace in class.' },
+        { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+      );
+      if (submitFeedback.status !== 201) {
+        console.error('FAIL: submit feedback', submitFeedback.status, submitFeedback.data);
+        failed++;
+      } else {
+        const feedbackSummary = await request(
+          'GET',
+          `/api/teacher/courses/${createCourse.data.id}/feedback`,
+          null,
+          { 'x-user-email': 'hales@milton.edu', 'x-user-name': 'Mr. Hales' }
+        );
+        const feedbackOk = feedbackSummary.status === 200
+          && feedbackSummary.data?.totalResponses >= 1
+          && Array.isArray(feedbackSummary.data?.ratingBreakdown);
+        if (!feedbackOk) {
+          console.error('FAIL: feedback summary', feedbackSummary.status, feedbackSummary.data);
+          failed++;
+        } else {
+          console.log('PASS: feedback summary visible to teacher');
+        }
+      }
+    }
   }
 
   if (failed > 0) {
