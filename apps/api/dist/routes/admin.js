@@ -5,20 +5,8 @@ const crypto_1 = require("crypto");
 const express_1 = require("express");
 const zod_1 = require("zod");
 const db_1 = require("@planner/db");
-const identity_1 = require("../utils/identity");
+const identity_1 = require("../middleware/identity");
 exports.adminRouter = (0, express_1.Router)();
-function getIdentity(req) {
-    const email = req.headers['x-user-email']?.trim() || '';
-    return { email };
-}
-function requireTeacher(req, res, next) {
-    const email = getIdentity(req).email.toLowerCase().trim();
-    if (!email || !(0, identity_1.isTeacherEligible)(email)) {
-        res.status(403).json({ error: 'Teacher only' });
-        return;
-    }
-    next();
-}
 const blocklistBodySchema = zod_1.z.object({
     blockedEmail: zod_1.z.string().email(),
     blockedUntil: zod_1.z.string().min(1), // ISO date
@@ -44,21 +32,20 @@ exports.adminRouter.post('/cleanup-closed', (req, res) => {
         : (0, db_1.deleteClosedRequestsOlderThanDays)(days < 1 ? 7 : days, logger);
     res.json(result);
 });
-exports.adminRouter.get('/blocklist', requireTeacher, (_req, res) => {
+exports.adminRouter.get('/blocklist', identity_1.requireTeacher, (_req, res) => {
     const entries = (0, db_1.listBlocklistEntries)();
     res.json(entries);
 });
-exports.adminRouter.post('/blocklist', requireTeacher, (req, res) => {
+exports.adminRouter.post('/blocklist', identity_1.requireTeacher, (req, res) => {
     const parsed = blocklistBodySchema.safeParse(req.body);
     if (!parsed.success) {
         return res.status(400).json({ error: parsed.error.errors.map((e) => e.message).join('; ') });
     }
-    const identity = getIdentity(req);
     const entry = {
         id: (0, crypto_1.randomUUID)(),
         blockedEmail: parsed.data.blockedEmail.toLowerCase().trim(),
         blockedUntil: parsed.data.blockedUntil,
-        blockedByEmail: identity.email || '',
+        blockedByEmail: req.user?.email || '',
         createdAt: new Date().toISOString(),
     };
     (0, db_1.addBlocklistEntry)(entry);

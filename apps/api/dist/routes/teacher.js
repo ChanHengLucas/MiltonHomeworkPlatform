@@ -25,6 +25,27 @@ const createGradingTaskSchema = zod_1.z.object({
     dueAtMs: zod_1.z.number().int().optional().nullable(),
     estMinutes: zod_1.z.number().int().min(5, 'Estimated time must be at least 5 minutes'),
 });
+const createAnnouncementSchema = zod_1.z.object({
+    title: zod_1.z.string().min(1, 'Announcement title is required'),
+    body: zod_1.z.string().min(1, 'Announcement body is required'),
+});
+function generateCourseCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let out = '';
+    for (let i = 0; i < 6; i += 1) {
+        out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+    return out;
+}
+function createUniqueCourseCode(maxAttempts = 20) {
+    for (let i = 0; i < maxAttempts; i += 1) {
+        const code = generateCourseCode();
+        if (!(0, db_1.getCourseByCode)(code)) {
+            return code;
+        }
+    }
+    throw new Error('Failed to generate unique course code');
+}
 exports.teacherRouter = (0, express_1.Router)();
 exports.teacherRouter.use(identity_1.requireTeacher);
 exports.teacherRouter.post('/courses', (req, res, next) => {
@@ -38,6 +59,7 @@ exports.teacherRouter.post('/courses', (req, res, next) => {
     const course = {
         id: (0, crypto_1.randomUUID)(),
         name: parsed.data.name,
+        courseCode: createUniqueCourseCode(),
         teacherEmail,
         createdAt: new Date().toISOString(),
     };
@@ -96,6 +118,29 @@ exports.teacherRouter.post('/assignments', (req, res, next) => {
         createdAt: new Date().toISOString(),
     };
     (0, db_1.createCourseAssignment)(a);
+    const members = (0, db_1.listCourseMembers)(course.id);
+    for (const studentEmail of members) {
+        try {
+            (0, db_1.createNotification)({
+                userEmail: studentEmail,
+                type: 'assignment_posted',
+                dedupeKey: `assignment_posted:${a.id}:${studentEmail.toLowerCase().trim()}`,
+                payload: {
+                    assignmentId: a.id,
+                    courseId: course.id,
+                    courseName: course.name,
+                    title: a.title,
+                    dueAtMs: a.dueAtMs,
+                },
+            });
+        }
+        catch (err) {
+            const log = req.log;
+            if (log) {
+                log.warn({ err, courseId: course.id, studentEmail }, '[Teacher] Failed to create assignment notification');
+            }
+        }
+    }
     res.status(201).json(a);
 });
 exports.teacherRouter.get('/courses/:id/assignments', (req, res) => {
@@ -105,6 +150,43 @@ exports.teacherRouter.get('/courses/:id/assignments', (req, res) => {
     }
     const assignments = (0, db_1.listCourseAssignmentsByCourse)(course.id);
     res.json(assignments);
+});
+exports.teacherRouter.post('/courses/:id/announcements', (req, res, next) => {
+    const course = (0, db_1.getCourse)(req.params.id);
+    if (!course || course.teacherEmail !== req.user.email) {
+        return res.status(404).json({ error: 'Course not found' });
+    }
+    const parsed = createAnnouncementSchema.safeParse(req.body);
+    if (!parsed.success) {
+        const err = new Error(parsed.error.errors.map((e) => e.message).join('; '));
+        err.statusCode = 400;
+        return next(err);
+    }
+    const announcement = (0, db_1.createCourseAnnouncement)({
+        id: (0, crypto_1.randomUUID)(),
+        courseId: course.id,
+        title: parsed.data.title.trim(),
+        body: parsed.data.body.trim(),
+        createdByEmail: req.user.email,
+        createdAt: new Date().toISOString(),
+    });
+    res.status(201).json(announcement);
+});
+exports.teacherRouter.get('/courses/:id/announcements', (req, res) => {
+    const course = (0, db_1.getCourse)(req.params.id);
+    if (!course || course.teacherEmail !== req.user.email) {
+        return res.status(404).json({ error: 'Course not found' });
+    }
+    const announcements = (0, db_1.listCourseAnnouncementsByCourse)(course.id);
+    res.json(announcements);
+});
+exports.teacherRouter.get('/courses/:id/feedback', (req, res) => {
+    const course = (0, db_1.getCourse)(req.params.id);
+    if (!course || course.teacherEmail !== req.user.email) {
+        return res.status(404).json({ error: 'Course not found' });
+    }
+    const summary = (0, db_1.getCourseFeedbackSummary)(course.id);
+    res.json(summary);
 });
 // Grading tasks
 exports.teacherRouter.post('/grading-tasks', (req, res, next) => {

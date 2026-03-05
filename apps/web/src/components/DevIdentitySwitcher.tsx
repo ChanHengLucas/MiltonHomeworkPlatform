@@ -1,4 +1,5 @@
 import { useAppState } from '../context/AppContext';
+import { useIdentity } from '../hooks/useIdentity';
 
 const PRESETS = [
   { id: 'student-a', email: 'lucas12@milton.edu', name: 'Lucas Chan', label: 'Student A' },
@@ -7,15 +8,29 @@ const PRESETS = [
 ] as const;
 
 export function DevIdentitySwitcher() {
-  const { schoolEmail, setSchoolEmail, displayName, setDisplayName } = useAppState();
+  const { schoolEmail, setSchoolEmail, displayName, setDisplayName, identitySource } = useAppState();
+  const { devModeAvailable } = useIdentity();
 
   if (import.meta.env.PROD) return null;
+
+  if (!devModeAvailable) {
+    return (
+      <p className="form-hint" style={{ margin: 0 }}>
+        Google auth mode is active. Dev identity is disabled.
+      </p>
+    );
+  }
 
   const currentPreset = PRESETS.find((p) => p.email === schoolEmail);
   const presetId = currentPreset?.id ?? 'custom';
 
   return (
     <div className="dev-identity-switcher">
+      <p className="form-hint" style={{ margin: 0 }}>
+        {identitySource === 'dev'
+          ? 'Dev mode identity is active (not Google).'
+          : 'Google/session identity is active. Select a preset to override with dev identity.'}
+      </p>
       <label className="dev-identity-label">
         <span>Dev Identity:</span>
         <select
@@ -62,6 +77,16 @@ export function DevIdentitySwitcher() {
           {schoolEmail || '(none)'}
         </span>
       )}
+      <button
+        type="button"
+        className="ui-btn btn-secondary btn-sm"
+        onClick={() => {
+          setSchoolEmail('');
+          setDisplayName('');
+        }}
+      >
+        Disable Dev Identity
+      </button>
     </div>
   );
 }

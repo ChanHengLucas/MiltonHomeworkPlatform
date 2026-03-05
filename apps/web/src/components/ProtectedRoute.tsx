@@ -1,17 +1,15 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuthGate } from '../hooks/useAuthGate';
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { isLoading, isSignedIn } = useAuthGate();
   const location = useLocation();
 
-  const allowWithoutAuth = import.meta.env.DEV || import.meta.env.VITE_E2E_TEST === '1';
-
-  if (loading) {
+  if (isLoading) {
     return <p>Loading…</p>;
   }
 
-  if (!user && !allowWithoutAuth) {
+  if (!isSignedIn) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

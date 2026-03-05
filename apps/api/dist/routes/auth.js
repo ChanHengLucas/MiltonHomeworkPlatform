@@ -4,22 +4,77 @@ exports.authRouter = void 0;
 const express_1 = require("express");
 const google_auth_library_1 = require("google-auth-library");
 const identity_1 = require("../utils/identity");
+const authMode_1 = require("../config/authMode");
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-const MOCK_AUTH = process.env.MOCK_AUTH === 'true';
+const AUTH_MODE_INFO = (0, authMode_1.getAuthModeInfo)();
+const AUTH_MODE = AUTH_MODE_INFO.mode;
+const FALLBACK_WEB_ORIGIN = (0, authMode_1.getWebOriginFallback)();
 exports.authRouter = (0, express_1.Router)();
 function getOAuthClient() {
-    return new google_auth_library_1.OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, `${FRONTEND_URL}/auth/google/callback`);
+    return new google_auth_library_1.OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, AUTH_MODE_INFO.googleCallbackUrl);
 }
-exports.authRouter.get('/google/start', (req, res) => {
-    if (MOCK_AUTH) {
-        return res.redirect(`${FRONTEND_URL}/login?mock=1`);
+function isAllowedReturnOrigin(origin) {
+    if (!origin)
+        return false;
+    if (AUTH_MODE_INFO.nodeEnv === 'production') {
+        return origin === FALLBACK_WEB_ORIGIN;
     }
-    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-        return res.status(500).json({ error: 'Google OAuth not configured' });
+    return /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+}
+function normalizeReturnOrigin(value) {
+    if (!value)
+        return null;
+    try {
+        const origin = new URL(value).origin;
+        return isAllowedReturnOrigin(origin) ? origin : null;
+    }
+    catch {
+        return null;
+    }
+}
+function resolveReturnOrigin(req) {
+    const fromOrigin = normalizeReturnOrigin(req.get('origin'));
+    if (fromOrigin)
+        return fromOrigin;
+    const referer = req.get('referer');
+    const fromReferer = normalizeReturnOrigin(referer);
+    if (fromReferer)
+        return fromReferer;
+    return FALLBACK_WEB_ORIGIN;
+}
+function encodeOAuthState(value) {
+    return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+}
+function decodeOAuthState(raw) {
+    if (typeof raw !== 'string' || !raw.trim())
+        return {};
+    try {
+        const json = Buffer.from(raw, 'base64url').toString('utf8');
+        const parsed = JSON.parse(json);
+        if (typeof parsed !== 'object' || parsed == null)
+            return {};
+        return parsed;
+    }
+    catch {
+        return {};
+    }
+}
+exports.authRouter.get('/google/start', (_req, res) => {
+    if (AUTH_MODE === 'dev') {
+        return res.status(400).json({
+            error: 'Google auth is disabled in dev mode. Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL to enable it.',
+            mode: 'dev',
+        });
+    }
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !AUTH_MODE_INFO.detected.googleCallbackUrl) {
+        return res.status(500).json({
+            error: 'Google OAuth not configured',
+            mode: 'google',
+        });
     }
     const client = getOAuthClient();
+    const returnOrigin = resolveReturnOrigin(_req);
     const scopes = [
         'openid',
         'email',
@@ -30,16 +85,20 @@ exports.authRouter.get('/google/start', (req, res) => {
         access_type: 'offline',
         scope: scopes,
         prompt: 'consent',
+        state: encodeOAuthState({ returnOrigin }),
     });
+    console.log('[Auth] Redirecting to Google OAuth start');
     res.redirect(url);
 });
 exports.authRouter.get('/google/callback', async (req, res) => {
-    if (MOCK_AUTH) {
-        return res.redirect(`${FRONTEND_URL}/login?mock=1`);
+    const state = decodeOAuthState(req.query.state);
+    const returnOrigin = normalizeReturnOrigin(state.returnOrigin) || FALLBACK_WEB_ORIGIN;
+    if (AUTH_MODE === 'dev') {
+        return res.redirect(`${returnOrigin}/login?dev=1`);
     }
     const { code } = req.query;
     if (!code || typeof code !== 'string') {
-        return res.redirect(`${FRONTEND_URL}/login?error=no_code`);
+        return res.redirect(`${returnOrigin}/login?error=no_code`);
     }
     try {
         const client = getOAuthClient();
@@ -58,6 +117,7 @@ exports.authRouter.get('/google/callback', async (req, res) => {
             access_token: tokens.access_token || undefined,
             refresh_token: tokens.refresh_token || undefined,
         };
+        console.log('[Auth] Google callback success', { email });
         await new Promise((resolve, reject) => {
             req.session.save((err) => {
                 if (err)
@@ -66,11 +126,11 @@ exports.authRouter.get('/google/callback', async (req, res) => {
                     resolve();
             });
         });
-        res.redirect(FRONTEND_URL);
+        res.redirect(returnOrigin);
     }
     catch (err) {
         console.error('[Auth] Google callback error', err);
-        res.redirect(`${FRONTEND_URL}/login?error=callback_failed`);
+        res.redirect(`${returnOrigin}/login?error=callback_failed`);
     }
 });
 exports.authRouter.post('/logout', (req, res) => {
@@ -78,27 +138,30 @@ exports.authRouter.post('/logout', (req, res) => {
     res.json({ ok: true });
 });
 exports.authRouter.get('/me', (req, res) => {
-    if (MOCK_AUTH) {
-        const email = req.headers['x-user-email']?.trim() || '';
-        const name = req.headers['x-user-name']?.trim() || email.split('@')[0] || 'Mock User';
-        if (!email) {
-            return res.status(401).json({ error: 'Not authenticated' });
-        }
+    if (AUTH_MODE === 'dev') {
+        const email = (req.user?.email || '').trim();
+        const fallbackName = email ? email.split('@')[0] : 'anonymous';
+        const name = (req.user?.name || fallbackName).trim() || fallbackName;
         return res.json({
             email,
             name,
             picture: null,
             isTeacher: (0, identity_1.isTeacherEligible)(email),
+            mode: 'dev',
+            authenticated: Boolean(email),
         });
     }
     const user = req.session?.user;
     if (!user?.email) {
-        return res.status(401).json({ error: 'Not authenticated' });
+        return res.status(401).json({ error: 'Not authenticated', mode: 'google' });
     }
+    console.log('[Auth] /me resolved from session', { email: user.email });
     res.json({
         email: user.email,
         name: user.name,
         picture: user.picture ?? null,
         isTeacher: (0, identity_1.isTeacherEligible)(user.email),
+        mode: 'google',
+        authenticated: true,
     });
 });

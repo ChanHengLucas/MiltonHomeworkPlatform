@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { api, type Assignment, type CourseAssignment } from '../api';
 import { Button, Card, Callout } from '../components/ui';
+import { useAuthGate } from '../hooks/useAuthGate';
 import { fromDateTimeLocalValue, formatDueDate } from '../utils/datetime';
 
 const PRIORITY_OPTIONS = [
@@ -15,6 +16,7 @@ const PRIORITY_OPTIONS = [
 
 export function AssignmentsPage() {
   const navigate = useNavigate();
+  const { isSignedIn } = useAuthGate();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teacherAssignments, setTeacherAssignments] = useState<CourseAssignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,10 +36,19 @@ export function AssignmentsPage() {
   const addAssignmentFormId = 'add-assignment-form';
 
   useEffect(() => {
+    if (!isSignedIn) {
+      setLoading(false);
+      setAssignments([]);
+      setTeacherAssignments([]);
+      setError(null);
+      return;
+    }
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn]);
 
   async function load() {
+    if (!isSignedIn) return;
     try {
       setLoading(true);
       setError(null);

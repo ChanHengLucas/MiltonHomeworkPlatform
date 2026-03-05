@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { setDevIdentity } from './devIdentity';
 
 test.describe('Insights + Teacher gating', () => {
   test('student hides teacher nav, teacher can access teacher pages and insights', async ({
     page,
   }) => {
+    await setDevIdentity(page, 'student-a');
     await page.goto('/assignments');
-    await page.selectOption('.dev-identity-select', 'student-a');
     await expect(page.locator('.nav-link:has-text("Teacher")')).not.toBeVisible();
     await expect(page.locator('.nav-link:has-text("Insights")')).not.toBeVisible();
 
@@ -18,7 +19,7 @@ test.describe('Insights + Teacher gating', () => {
     await expect(page.locator('text=Back to Support Hub')).toBeVisible();
 
     // Teacher can see teacher navigation and insights
-    await page.selectOption('.dev-identity-select', 'teacher');
+    await setDevIdentity(page, 'teacher');
     await expect(page.locator('.nav-link:has-text("Teacher")')).toBeVisible();
     await expect(page.locator('.nav-link:has-text("Insights")')).toBeVisible();
 

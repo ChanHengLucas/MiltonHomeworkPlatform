@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { setDevIdentity } from './devIdentity';
 
 test.describe('Support hub flow', () => {
   test('create request, claim as Student B, comment as helper, self-claim blocked', async ({
@@ -6,8 +7,8 @@ test.describe('Support hub flow', () => {
     request: apiRequest,
   }) => {
     // Create assignment first for linking
+    await setDevIdentity(page, 'student-a');
     await page.goto('/assignments');
-    await page.selectOption('.dev-identity-select', 'student-a');
     await page.fill('input[placeholder="Assignment title"]', 'Support test assignment');
     await page.fill('input[placeholder="e.g. Math 101"]', 'Math');
     await page.fill('input[type="number"][placeholder="e.g. 30"]', '30');
@@ -35,7 +36,7 @@ test.describe('Support hub flow', () => {
     await expect(page.getByText('I need help with this assignment.')).toBeVisible();
 
     // Switch to Student B and claim
-    await page.selectOption('.dev-identity-select', 'student-b');
+    await setDevIdentity(page, 'student-b');
     await page.fill('input[placeholder="Your name"]', 'Test Student');
     await page.click('button:has-text("Claim request")');
 
@@ -53,7 +54,7 @@ test.describe('Support hub flow', () => {
     await expect(page.locator('button:has-text("Close request")')).not.toBeVisible();
 
     // Switch back to Student A - requester can close and cannot claim while request is claimed
-    await page.selectOption('.dev-identity-select', 'student-a');
+    await setDevIdentity(page, 'student-a');
     await expect(page.locator('button:has-text("Claim request")')).not.toBeVisible();
     await expect(page.locator('button:has-text("Close request")')).toBeVisible();
   });

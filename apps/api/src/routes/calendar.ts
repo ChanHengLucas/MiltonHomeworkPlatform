@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
+import { getAuthModeInfo } from '../config/authMode';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { data: { startMs: number; endMs: number; source: string }[]; expires: number }>();
+const AUTH_MODE_INFO = getAuthModeInfo();
 
 function getTokens(req: Request): { access_token?: string; refresh_token?: string } | null {
   const session = req.session as { googleTokens?: { access_token?: string; refresh_token?: string } };
@@ -13,7 +15,7 @@ function getTokens(req: Request): { access_token?: string; refresh_token?: strin
 function getOAuthClient(): OAuth2Client {
   const clientId = process.env.GOOGLE_CLIENT_ID || '';
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-  const redirectUri = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/google/callback`;
+  const redirectUri = AUTH_MODE_INFO.googleCallbackUrl;
   return new OAuth2Client(clientId, clientSecret, redirectUri);
 }
 
@@ -29,6 +31,12 @@ function getStatusCodeFromError(err: unknown): number {
 export const calendarRouter = Router();
 
 calendarRouter.get('/busy', async (req: Request, res: Response) => {
+  if (AUTH_MODE_INFO.mode !== 'google') {
+    return res.status(501).json({
+      error: 'Google Calendar requires Google login; configure OAuth env vars.',
+      mode: AUTH_MODE_INFO.mode,
+    });
+  }
   const tokens = getTokens(req);
   if (!tokens?.access_token) {
     return res.status(401).json({ error: 'Not authenticated with Google. Sign in with Google to import calendar.' });

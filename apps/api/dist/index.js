@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+require("./config/env");
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const cors_1 = __importDefault(require("cors"));
 const express_1 = __importDefault(require("express"));
@@ -20,22 +21,46 @@ const insights_1 = require("./routes/insights");
 const plan_1 = require("./routes/plan");
 const requests_1 = require("./routes/requests");
 const admin_1 = require("./routes/admin");
+const settings_1 = require("./routes/settings");
+const db_2 = require("./routes/db");
+const notifications_1 = require("./routes/notifications");
 const errorHandler_1 = require("./middleware/errorHandler");
 const identity_1 = require("./middleware/identity");
+const notifications_2 = require("./services/notifications");
+const authMode_1 = require("./config/authMode");
 const logger = (0, pino_1.default)({
     level: process.env.LOG_LEVEL ?? 'info',
     transport: process.env.NODE_ENV === 'development'
         ? { target: 'pino-pretty', options: { colorize: true } }
         : undefined,
 });
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const AUTH_MODE_INFO = (0, authMode_1.getAuthModeInfo)();
+const WEB_ORIGIN = process.env.WEB_ORIGIN || process.env.FRONTEND_URL || '';
+const WEB_ORIGIN_FALLBACK = (0, authMode_1.getWebOriginFallback)();
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-prod';
+const IS_PROD = process.env.NODE_ENV === 'production';
+const DEV_ORIGIN_PATTERN = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ?? 4000;
-app.use((0, cors_1.default)({
-    origin: FRONTEND_URL,
+if (IS_PROD) {
+    app.set('trust proxy', 1);
+}
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+        if (!IS_PROD) {
+            const allowed = DEV_ORIGIN_PATTERN.test(origin) || Boolean(WEB_ORIGIN && origin === WEB_ORIGIN);
+            callback(null, allowed);
+            return;
+        }
+        callback(null, Boolean(WEB_ORIGIN && origin === WEB_ORIGIN));
+    },
     credentials: true,
-}));
+};
+app.use((0, cors_1.default)(corsOptions));
 app.use((0, cookie_parser_1.default)());
 app.use(express_1.default.json());
 app.use((0, express_session_1.default)({
@@ -44,7 +69,7 @@ app.use((0, express_session_1.default)({
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: IS_PROD,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000,
     },
@@ -53,6 +78,10 @@ app.use((0, identity_1.identityMiddleware)(logger));
 app.use((0, pino_http_1.default)({
     logger,
     customLogLevel: (req, res, err) => {
+        const originalUrl = req.originalUrl ?? req.url;
+        if (res.statusCode === 401 && (originalUrl === '/api/auth/me' || originalUrl === '/auth/me' || req.url === '/me')) {
+            return 'info';
+        }
         if (res.statusCode >= 500 || err)
             return 'error';
         if (res.statusCode >= 400)
@@ -62,7 +91,16 @@ app.use((0, pino_http_1.default)({
     customSuccessMessage: (req, res) => `${req.method} ${req.url} ${res.statusCode}`,
     customErrorMessage: (req, res, err) => `${req.method} ${req.url} ${res.statusCode} - ${err?.message ?? 'Unknown error'}`,
 }));
-app.use('/auth', auth_1.authRouter);
+app.use((req, res, next) => {
+    const requestId = String(req.id ?? '');
+    if (requestId) {
+        res.setHeader('X-Request-Id', requestId);
+    }
+    next();
+});
+app.use('/api/auth', auth_1.authRouter);
+app.use('/auth', auth_1.authRouter); // legacy alias for older clients
+app.use('/api/db', db_2.dbRouter);
 app.use('/api/calendar', calendar_1.calendarRouter);
 app.use('/api/assignments', assignments_1.assignmentsRouter);
 app.use('/api/teacher', teacher_1.teacherRouter);
@@ -72,17 +110,45 @@ app.use('/api/plan', plan_1.planRouter);
 app.use('/api/requests', requests_1.requestsRouter);
 app.use('/api/insights', insights_1.insightsRouter);
 app.use('/api/admin', admin_1.adminRouter);
+app.use('/api/settings', settings_1.settingsRouter);
+app.use('/api/notifications', notifications_1.notificationsRouter);
+const mountedRoutePrefixes = [
+    '/api/auth',
+    '/auth (legacy alias)',
+    '/api/db',
+    '/api/calendar',
+    '/api/assignments',
+    '/api/teacher',
+    '/api/student',
+    '/api/availability',
+    '/api/plan',
+    '/api/requests',
+    '/api/insights',
+    '/api/admin',
+    '/api/settings',
+    '/api/notifications',
+    '/api/health',
+];
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 app.use((0, errorHandler_1.errorHandler)(logger));
 const CLEANUP_TTL_DAYS = parseInt(process.env.CLEANUP_TTL_DAYS ?? '7', 10) || 7;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const DUE_REMINDER_INTERVAL_MS = parseInt(process.env.DUE_REMINDER_INTERVAL_MS ?? '600000', 10) || 600000;
 function start() {
     logger.info('[API] Starting...');
+    logger.info({
+        mode: AUTH_MODE_INFO.mode,
+        nodeEnv: AUTH_MODE_INFO.nodeEnv,
+        detected: AUTH_MODE_INFO.detected,
+        callbackUrl: AUTH_MODE_INFO.googleCallbackUrl,
+        webOrigin: WEB_ORIGIN || WEB_ORIGIN_FALLBACK,
+    }, '[Auth] Startup mode');
+    logger.info({ routes: mountedRoutePrefixes }, '[API] Mounted route prefixes');
     try {
         (0, db_1.initDb)();
-        logger.info('[API] Database initialized');
+        logger.info({ dbFile: (0, db_1.getDatabaseFilePath)() }, '[API] Database initialized');
     }
     catch (err) {
         logger.error({ err }, '[API] Failed to initialize database');
@@ -97,6 +163,21 @@ function start() {
         }
     }, CLEANUP_INTERVAL_MS);
     logger.info({ ttlDays: CLEANUP_TTL_DAYS }, '[API] Cleanup job scheduled');
+    try {
+        (0, notifications_2.runDueReminderScan)(logger);
+    }
+    catch (err) {
+        logger.error({ err }, '[API] Initial due-reminder scan failed');
+    }
+    setInterval(() => {
+        try {
+            (0, notifications_2.runDueReminderScan)(logger);
+        }
+        catch (err) {
+            logger.error({ err }, '[API] Due-reminder job failed');
+        }
+    }, DUE_REMINDER_INTERVAL_MS);
+    logger.info({ intervalMs: DUE_REMINDER_INTERVAL_MS }, '[API] Due-reminder job scheduled');
     app.listen(PORT, () => {
         logger.info({ port: PORT }, '[API] API listening on port %s', PORT);
         // eslint-disable-next-line no-console

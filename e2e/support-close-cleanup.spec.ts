@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { setDevIdentity } from './devIdentity';
 
 const API_BASE = process.env.API_BASE || 'http://localhost:4000';
 
@@ -8,8 +9,8 @@ test.describe('Close request + cleanup (dev)', () => {
     request: apiRequest,
   }) => {
     // Create a request as Student A
+    await setDevIdentity(page, 'student-a');
     await page.goto('/support');
-    await page.selectOption('.dev-identity-select', 'student-a');
     await page.fill('input[placeholder*="summary"]', 'Cleanup test request');
     await page.fill('textarea[placeholder*="detail"]', 'For cleanup test.');
     await page.fill('input[placeholder*="Math"]', 'Math');

@@ -60,6 +60,7 @@ async function main() {
       PORT: String(API_PORT),
       DATABASE_FILE: testDbPath,
       NODE_ENV: 'development',
+      MOCK_AUTH: '1',
       MAX_ACTIVE_CLAIMS: '50',
       MAX_CLAIMS_PER_HOUR: '100',
     },

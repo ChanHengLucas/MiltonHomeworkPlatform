@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import {
   deleteClosedRequestsOlderThanDays,
@@ -7,23 +7,9 @@ import {
   addBlocklistEntry,
   listBlocklistEntries,
 } from '@planner/db';
-import { isTeacherEligible } from '../utils/identity';
+import { requireTeacher } from '../middleware/identity';
 
 export const adminRouter = Router();
-
-function getIdentity(req: Request): { email: string } {
-  const email = (req.headers['x-user-email'] as string)?.trim() || '';
-  return { email };
-}
-
-function requireTeacher(req: Request, res: Response, next: NextFunction): void {
-  const email = getIdentity(req).email.toLowerCase().trim();
-  if (!email || !isTeacherEligible(email)) {
-    res.status(403).json({ error: 'Teacher only' });
-    return;
-  }
-  next();
-}
 
 const blocklistBodySchema = z.object({
   blockedEmail: z.string().email(),
@@ -65,12 +51,11 @@ adminRouter.post('/blocklist', requireTeacher, (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.errors.map((e) => e.message).join('; ') });
   }
-  const identity = getIdentity(req);
   const entry = {
     id: randomUUID(),
     blockedEmail: parsed.data.blockedEmail.toLowerCase().trim(),
     blockedUntil: parsed.data.blockedUntil,
-    blockedByEmail: identity.email || '',
+    blockedByEmail: req.user?.email || '',
     createdAt: new Date().toISOString(),
   };
   addBlocklistEntry(entry);

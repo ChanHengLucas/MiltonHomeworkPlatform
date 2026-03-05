@@ -1,39 +1,22 @@
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
+  useContext,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { isTeacherEligible, displayNameFromEmail } from '../utils/identity';
-import { useAuth } from './AuthContext';
+import { useIdentity, type IdentitySource } from '../hooks/useIdentity';
 
 const STORAGE_KEY_TEACHER = 'planner_teacher_mode';
-const STORAGE_KEY_EMAIL = 'planner_school_email';
-const STORAGE_KEY_DISPLAY_NAME = 'planner_display_name';
 
 function loadTeacherMode(): boolean {
   try {
     return localStorage.getItem(STORAGE_KEY_TEACHER) === 'true';
   } catch {
     return false;
-  }
-}
-
-function loadSchoolEmail(): string {
-  try {
-    return localStorage.getItem(STORAGE_KEY_EMAIL) || '';
-  } catch {
-    return '';
-  }
-}
-
-function loadDisplayName(): string {
-  try {
-    return localStorage.getItem(STORAGE_KEY_DISPLAY_NAME) || '';
-  } catch {
-    return '';
   }
 }
 
@@ -50,6 +33,7 @@ interface AppState {
   setSchoolEmail: (email: string) => void;
   displayName: string;
   setDisplayName: (name: string) => void;
+  identitySource: IdentitySource;
   teacherEligible: boolean;
   suggestedClaimName: string;
   calendarBusyBlocks: CalendarBusyBlock[];
@@ -60,21 +44,16 @@ interface AppState {
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { user: authUser } = useAuth();
+  const { source, profile, setDevIdentity } = useIdentity();
   const [teacherMode, setTeacherModeState] = useState(loadTeacherMode);
-  const [devEmail, setDevEmail] = useState(loadSchoolEmail);
-  const [devDisplayName, setDevDisplayName] = useState(loadDisplayName);
-
-  const schoolEmail = authUser?.email ?? devEmail;
-  const displayName = authUser?.name ?? devDisplayName;
+  const schoolEmail = profile?.email ?? '';
+  const displayName = profile?.name ?? '';
+  const devIdentityDraftRef = useRef<{ email: string; name: string }>({ email: schoolEmail, name: displayName });
   const teacherEligible = useMemo(() => isTeacherEligible(schoolEmail), [schoolEmail]);
 
   useEffect(() => {
-    if (!authUser && import.meta.env.DEV) {
-      setDevEmail(loadSchoolEmail());
-      setDevDisplayName(loadDisplayName());
-    }
-  }, [authUser]);
+    devIdentityDraftRef.current = { email: schoolEmail, name: displayName };
+  }, [schoolEmail, displayName]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_TEACHER, String(teacherMode));
@@ -86,29 +65,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [teacherEligible, teacherMode]);
 
-  useEffect(() => {
-    if (!authUser) {
-      localStorage.setItem(STORAGE_KEY_EMAIL, devEmail);
-    }
-  }, [devEmail, authUser]);
-
-  useEffect(() => {
-    if (!authUser) {
-      localStorage.setItem(STORAGE_KEY_DISPLAY_NAME, devDisplayName);
-    }
-  }, [devDisplayName, authUser]);
-
   const setTeacherMode = useCallback((enabled: boolean) => {
     setTeacherModeState(enabled);
   }, []);
 
   const setSchoolEmail = useCallback((email: string) => {
-    setDevEmail(email);
-  }, []);
+    const next = { email, name: devIdentityDraftRef.current.name };
+    devIdentityDraftRef.current = next;
+    setDevIdentity(next.email, next.name);
+  }, [setDevIdentity]);
 
   const setDisplayName = useCallback((name: string) => {
-    setDevDisplayName(name);
-  }, []);
+    const next = { email: devIdentityDraftRef.current.email, name };
+    devIdentityDraftRef.current = next;
+    setDevIdentity(next.email, next.name);
+  }, [setDevIdentity]);
 
   const suggestedClaimName = useMemo(
     () => displayName.trim() || displayNameFromEmail(schoolEmail),
@@ -130,6 +101,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setSchoolEmail,
       displayName,
       setDisplayName,
+      identitySource: source,
       teacherEligible,
       suggestedClaimName,
       calendarBusyBlocks,
@@ -143,6 +115,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setSchoolEmail,
       displayName,
       setDisplayName,
+      source,
       teacherEligible,
       suggestedClaimName,
       calendarBusyBlocks,

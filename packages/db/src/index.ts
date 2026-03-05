@@ -17,6 +17,11 @@ export interface HelpRequest {
   urgency: 'low' | 'med' | 'high';
   status: 'open' | 'claimed' | 'closed';
   createdAt: string;
+  claimMode?: 'any' | 'teacher_only' | null;
+  meetingAbout?: string | null;
+  meetingLocation?: string | null;
+  meetingLink?: string | null;
+  proposedTimes?: string | null;
   claimedBy?: string | null;
   claimedByEmail?: string | null;
   claimedAt?: string | null;
@@ -87,6 +92,11 @@ interface HelpRequestRow {
   urgency: string;
   status: string;
   createdAt: string;
+  claimMode?: string | null;
+  meetingAbout?: string | null;
+  meetingLocation?: string | null;
+  meetingLink?: string | null;
+  proposedTimes?: string | null;
   claimedBy: string | null;
   claimedByEmail?: string | null;
   claimedAt?: string | null;
@@ -114,6 +124,35 @@ interface RequestsSummaryRowRaw {
   count: number;
 }
 
+interface NotificationRow {
+  id: string;
+  userEmail: string;
+  type: string;
+  payloadJson: string | null;
+  dedupeKey: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+interface CourseFeedbackRow {
+  id: string;
+  courseId: string;
+  studentEmail: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface DueReminderCandidateRow {
+  assignmentId: string;
+  courseId: string;
+  courseName: string;
+  title: string;
+  dueAtMs: number;
+  studentEmail: string;
+}
+
 export interface RequestsSummaryRow {
   subject: string;
   urgency: string;
@@ -122,13 +161,68 @@ export interface RequestsSummaryRow {
 }
 
 let dbInstance: Database | null = null;
+let dbFilePath: string | null = null;
 
-function getDatabaseFile(): string {
+function formatCorruptSuffix(now = new Date()): string {
+  return now.toISOString().replace(/[:.]/g, '-');
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err ?? 'Unknown error');
+}
+
+function isIoError(err: unknown): boolean {
+  const sqliteErr = err as { code?: unknown; message?: unknown };
+  const code = typeof sqliteErr.code === 'string' ? sqliteErr.code.toUpperCase() : '';
+  const message = errorMessage(err).toLowerCase();
+  return (
+    code.startsWith('SQLITE_IOERR')
+    || message.includes('disk i/o error')
+    || message.includes('short_read')
+    || message.includes('short read')
+  );
+}
+
+function closeQuietly(db: Database | null): void {
+  if (!db) return;
+  try {
+    db.close();
+  } catch {
+    // ignore best-effort close errors during recovery
+  }
+}
+
+function backupCorruptDbFiles(dbPath: string, suffix: string): string[] {
+  const candidates = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  const moved: string[] = [];
+
+  for (const filePath of candidates) {
+    if (!fs.existsSync(filePath)) continue;
+    const backupPath = `${filePath}.corrupt-${suffix}`;
+    try {
+      fs.renameSync(filePath, backupPath);
+      moved.push(backupPath);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[DB] Failed to back up potentially corrupt SQLite file', {
+        filePath,
+        backupPath,
+        error: errorMessage(err),
+      });
+    }
+  }
+
+  return moved;
+}
+
+function resolveDatabaseFile(): string {
   const envPath = process.env.DATABASE_FILE;
-  const dbPath =
+  const rawPath =
     envPath && envPath.trim().length > 0
       ? envPath
       : path.join(process.cwd(), 'data', 'app.db');
+  const dbPath = path.resolve(rawPath);
 
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
@@ -138,11 +232,89 @@ function getDatabaseFile(): string {
   return dbPath;
 }
 
+export function getDatabaseFilePath(): string {
+  if (dbFilePath) return dbFilePath;
+  dbFilePath = resolveDatabaseFile();
+  return dbFilePath;
+}
+
+function logWriteError(operation: string, err: unknown): void {
+  const sqlErr = err as { code?: string; message?: string };
+  const message = sqlErr?.message ?? (err instanceof Error ? err.message : 'Unknown DB write error');
+  // eslint-disable-next-line no-console
+  console.error('[DB][WRITE_ERROR]', {
+    operation,
+    code: sqlErr?.code ?? 'UNKNOWN',
+    message,
+    dbFile: getDatabaseFilePath(),
+  });
+}
+
+function runWrite<T>(operation: string, fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    logWriteError(operation, err);
+    throw err;
+  }
+}
+
+function openDatabaseWithPragmas(file: string): Database {
+  const db = new DatabaseConstructor(file);
+  try {
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('busy_timeout = 5000');
+    return db;
+  } catch (err) {
+    closeQuietly(db);
+    throw err;
+  }
+}
+
 export function getDb(): Database {
   if (!dbInstance) {
-    const file = getDatabaseFile();
-    dbInstance = new DatabaseConstructor(file);
-    dbInstance.pragma('journal_mode = WAL');
+    const file = getDatabaseFilePath();
+    // eslint-disable-next-line no-console
+    console.info('[DB] Opening SQLite database', { dbFile: file });
+    try {
+      dbInstance = openDatabaseWithPragmas(file);
+    } catch (err) {
+      if (!isIoError(err)) {
+        throw err;
+      }
+
+      const recoverySuffix = formatCorruptSuffix();
+      // eslint-disable-next-line no-console
+      console.warn('[DB] SQLite I/O error on startup; attempting recovery with backup files', {
+        dbFile: file,
+        error: errorMessage(err),
+      });
+
+      const movedFiles = backupCorruptDbFiles(file, recoverySuffix);
+      // eslint-disable-next-line no-console
+      console.warn('[DB] Corrupt database files backed up', {
+        backups: movedFiles,
+      });
+
+      try {
+        dbInstance = openDatabaseWithPragmas(file);
+      } catch (recoveryErr) {
+        // eslint-disable-next-line no-console
+        console.error('[DB] Recovery failed while creating fresh SQLite database', {
+          dbFile: file,
+          error: errorMessage(recoveryErr),
+          backups: movedFiles,
+        });
+        throw recoveryErr;
+      }
+
+      // eslint-disable-next-line no-console
+      console.warn('[DB] Recovery complete. A fresh database was created; previous files were preserved.', {
+        dbFile: file,
+        backups: movedFiles,
+      });
+    }
   }
 
   return dbInstance;
@@ -352,19 +524,82 @@ const MIGRATIONS: Migration[] = [
         updatedAt TEXT NOT NULL
       );
     `
+  },
+  {
+    id: '013_course_codes_announcements',
+    up: `
+      ALTER TABLE courses ADD COLUMN courseCode TEXT;
+      UPDATE courses
+      SET courseCode = UPPER(SUBSTR(REPLACE(id, '-', ''), 1, 8))
+      WHERE courseCode IS NULL OR courseCode = '';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_courses_courseCode ON courses(courseCode);
+
+      CREATE TABLE IF NOT EXISTS course_announcements (
+        id TEXT PRIMARY KEY,
+        courseId TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        createdByEmail TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (courseId) REFERENCES courses(id) ON DELETE CASCADE
+      );
+    `
+  },
+  {
+    id: '014_support_request_meeting_claim_mode',
+    up: `
+      ALTER TABLE help_requests ADD COLUMN claimMode TEXT NOT NULL DEFAULT 'any';
+      ALTER TABLE help_requests ADD COLUMN meetingAbout TEXT;
+      ALTER TABLE help_requests ADD COLUMN meetingLocation TEXT;
+      ALTER TABLE help_requests ADD COLUMN meetingLink TEXT;
+      ALTER TABLE help_requests ADD COLUMN proposedTimes TEXT;
+    `
+  },
+  {
+    id: '015_notifications_feedback',
+    up: `
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        userEmail TEXT NOT NULL,
+        type TEXT NOT NULL,
+        payloadJson TEXT,
+        dedupeKey TEXT,
+        createdAt TEXT NOT NULL,
+        readAt TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(userEmail, createdAt DESC);
+      CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(userEmail, readAt);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(dedupeKey) WHERE dedupeKey IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS course_feedback (
+        id TEXT PRIMARY KEY,
+        courseId TEXT NOT NULL,
+        studentEmail TEXT NOT NULL,
+        rating INTEGER NOT NULL,
+        comment TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (courseId) REFERENCES courses(id) ON DELETE CASCADE,
+        UNIQUE(courseId, studentEmail)
+      );
+      CREATE INDEX IF NOT EXISTS idx_course_feedback_course ON course_feedback(courseId, updatedAt DESC);
+    `
   }
 ];
 
 export function applyMigrations(): void {
   const db = getDb();
 
-  db.exec('BEGIN');
+  runWrite('migration:begin', () => db.exec('BEGIN'));
   try {
-    db.exec(
+    runWrite(
+      'migration:createMigrationsTable',
+      () => db.exec(
       `CREATE TABLE IF NOT EXISTS migrations (
         id TEXT PRIMARY KEY,
         applied_at TEXT NOT NULL
       );`
+      )
     );
 
     const hasMigrationStmt = db.prepare(
@@ -377,14 +612,19 @@ export function applyMigrations(): void {
     for (const migration of MIGRATIONS) {
       const row = hasMigrationStmt.get(migration.id) as { count: number } | undefined;
       if (!row || row.count === 0) {
-        db.exec(migration.up);
-        insertMigrationStmt.run(migration.id, new Date().toISOString());
+        runWrite(`migration:${migration.id}:exec`, () => db.exec(migration.up));
+        runWrite(`migration:${migration.id}:record`, () => insertMigrationStmt.run(migration.id, new Date().toISOString()));
       }
     }
 
-    db.exec('COMMIT');
+    runWrite('migration:commit', () => db.exec('COMMIT'));
   } catch (err) {
-    db.exec('ROLLBACK');
+    try {
+      runWrite('migration:rollback', () => db.exec('ROLLBACK'));
+    } catch (rollbackErr) {
+      // eslint-disable-next-line no-console
+      console.error('[DB] Migration rollback failed', { error: errorMessage(rollbackErr) });
+    }
     throw err;
   }
 }
@@ -393,6 +633,43 @@ export function initDb(): Database {
   const db = getDb();
   applyMigrations();
   return db;
+}
+
+export interface DbHealthCheckResult {
+  ok: boolean;
+  dbFile: string;
+  checkedAt: string;
+}
+
+export function runDbHealthCheck(): DbHealthCheckResult {
+  const db = getDb();
+  const checkedAt = new Date().toISOString();
+  const marker = randomUUID();
+
+  runWrite('db_health.createTempTable', () =>
+    db.exec(
+      `CREATE TEMP TABLE IF NOT EXISTS __db_health_check (
+        id TEXT PRIMARY KEY,
+        createdAt TEXT NOT NULL
+      );`
+    )
+  );
+  runWrite('db_health.insert', () =>
+    db.prepare('INSERT INTO __db_health_check (id, createdAt) VALUES (?, ?)').run(marker, checkedAt)
+  );
+  const row = db.prepare('SELECT id FROM __db_health_check WHERE id = ?').get(marker) as { id: string } | undefined;
+  if (!row) {
+    throw new Error('DB health read failed after write');
+  }
+  runWrite('db_health.delete', () =>
+    db.prepare('DELETE FROM __db_health_check WHERE id = ?').run(marker)
+  );
+
+  return {
+    ok: true,
+    dbFile: getDatabaseFilePath(),
+    checkedAt,
+  };
 }
 
 // Assignment repository
@@ -424,26 +701,30 @@ export function createAssignment(assignment: Assignment): Assignment {
   );
 
   const dueAt = assignment.dueAt != null && assignment.dueAt > 0 ? assignment.dueAt : null;
-  stmt.run({
-    ...assignment,
-    dueAt,
-    completed: assignment.completed ? 1 : 0
-  });
+  runWrite('assignments.insert', () =>
+    stmt.run({
+      ...assignment,
+      dueAt,
+      completed: assignment.completed ? 1 : 0
+    })
+  );
 
   return assignment;
 }
 
 export function updateAssignmentCompletion(id: string, completed: boolean): void {
   const db = getDb();
-  db.prepare('UPDATE assignments SET completed = ? WHERE id = ?').run(
-    completed ? 1 : 0,
-    id
+  runWrite('assignments.updateCompletion', () =>
+    db.prepare('UPDATE assignments SET completed = ? WHERE id = ?').run(
+      completed ? 1 : 0,
+      id
+    )
   );
 }
 
 export function deleteAssignment(id: string): void {
   const db = getDb();
-  db.prepare('DELETE FROM assignments WHERE id = ?').run(id);
+  runWrite('assignments.delete', () => db.prepare('DELETE FROM assignments WHERE id = ?').run(id));
 }
 
 // Availability repository
@@ -463,17 +744,19 @@ export function listAvailabilityBlocks(): AvailabilityBlock[] {
 
 export function createAvailabilityBlock(block: AvailabilityBlock): AvailabilityBlock {
   const db = getDb();
-  db.prepare(
-    `INSERT INTO availability_blocks (id, startMin, endMin)
-     VALUES (@id, @startMin, @endMin)`
-  ).run(block);
+  runWrite('availability.insert', () =>
+    db.prepare(
+      `INSERT INTO availability_blocks (id, startMin, endMin)
+       VALUES (@id, @startMin, @endMin)`
+    ).run(block)
+  );
 
   return block;
 }
 
 export function deleteAvailabilityBlock(id: string): void {
   const db = getDb();
-  db.prepare('DELETE FROM availability_blocks WHERE id = ?').run(id);
+  runWrite('availability.delete', () => db.prepare('DELETE FROM availability_blocks WHERE id = ?').run(id));
 }
 
 // Courses (teacher publishing)
@@ -481,6 +764,7 @@ export function deleteAvailabilityBlock(id: string): void {
 export interface Course {
   id: string;
   name: string;
+  courseCode: string;
   teacherEmail: string;
   createdAt: string;
 }
@@ -511,6 +795,61 @@ export interface GradingTask {
   createdAt: string;
 }
 
+export interface CourseAnnouncement {
+  id: string;
+  courseId: string;
+  title: string;
+  body: string;
+  createdByEmail: string;
+  createdAt: string;
+}
+
+export type NotificationType =
+  | 'assignment_posted'
+  | 'request_claimed'
+  | 'request_unclaimed'
+  | 'request_closed'
+  | 'request_comment'
+  | 'due_reminder_24h'
+  | 'due_reminder_6h';
+
+export interface NotificationRecord {
+  id: string;
+  userEmail: string;
+  type: NotificationType;
+  payload: Record<string, unknown> | null;
+  dedupeKey: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface CourseFeedbackSubmission {
+  id: string;
+  courseId: string;
+  studentEmail: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CourseFeedbackSummary {
+  courseId: string;
+  totalResponses: number;
+  averageRating: number | null;
+  ratingBreakdown: { rating: number; count: number }[];
+  recentComments: { rating: number; comment: string; createdAt: string }[];
+}
+
+export interface DueReminderCandidate {
+  assignmentId: string;
+  courseId: string;
+  courseName: string;
+  title: string;
+  dueAtMs: number;
+  studentEmail: string;
+}
+
 export interface PlannerPreferences {
   userEmail: string;
   studyWindowStartMin: number;
@@ -524,9 +863,11 @@ export interface PlannerPreferences {
 
 export function createCourse(course: Course): Course {
   const db = getDb();
-  db.prepare(
-    'INSERT INTO courses (id, name, teacherEmail, createdAt) VALUES (@id, @name, @teacherEmail, @createdAt)'
-  ).run(course);
+  runWrite('courses.insert', () =>
+    db.prepare(
+      'INSERT INTO courses (id, name, courseCode, teacherEmail, createdAt) VALUES (@id, @name, @courseCode, @teacherEmail, @createdAt)'
+    ).run(course)
+  );
   return course;
 }
 
@@ -542,10 +883,21 @@ export function getCourse(id: string): Course | null {
   return row ?? null;
 }
 
+export function getCourseByCode(code: string): Course | null {
+  const db = getDb();
+  const normalized = code.trim().toUpperCase();
+  const row = db
+    .prepare('SELECT * FROM courses WHERE UPPER(courseCode) = ?')
+    .get(normalized) as Course | undefined;
+  return row ?? null;
+}
+
 export function addCourseMember(courseId: string, studentEmail: string): void {
   const db = getDb();
   const email = studentEmail.toLowerCase().trim();
-  db.prepare('INSERT OR IGNORE INTO course_members (courseId, studentEmail) VALUES (?, ?)').run(courseId, email);
+  runWrite('course_members.insertOrIgnore', () =>
+    db.prepare('INSERT OR IGNORE INTO course_members (courseId, studentEmail) VALUES (?, ?)').run(courseId, email)
+  );
 }
 
 export function listCourseMembers(courseId: string): string[] {
@@ -554,12 +906,38 @@ export function listCourseMembers(courseId: string): string[] {
   return rows.map((r) => r.studentEmail);
 }
 
+export function isStudentInCourse(courseId: string, studentEmail: string): boolean {
+  const db = getDb();
+  const email = studentEmail.toLowerCase().trim();
+  const row = db
+    .prepare('SELECT 1 FROM course_members WHERE courseId = ? AND studentEmail = ? LIMIT 1')
+    .get(courseId, email);
+  return !!row;
+}
+
+export function listCoursesByStudent(studentEmail: string): Course[] {
+  const db = getDb();
+  const email = studentEmail.toLowerCase().trim();
+  const rows = db
+    .prepare(
+      `SELECT c.*
+       FROM courses c
+       INNER JOIN course_members cm ON cm.courseId = c.id
+       WHERE cm.studentEmail = ?
+       ORDER BY c.name ASC`
+    )
+    .all(email) as Course[];
+  return rows;
+}
+
 export function createCourseAssignment(a: CourseAssignment): CourseAssignment {
   const db = getDb();
-  db.prepare(
-    `INSERT INTO course_assignments (id, courseId, title, description, dueAtMs, estMinutes, type, createdByEmail, createdAt)
-     VALUES (@id, @courseId, @title, @description, @dueAtMs, @estMinutes, @type, @createdByEmail, @createdAt)`
-  ).run(a);
+  runWrite('course_assignments.insert', () =>
+    db.prepare(
+      `INSERT INTO course_assignments (id, courseId, title, description, dueAtMs, estMinutes, type, createdByEmail, createdAt)
+       VALUES (@id, @courseId, @title, @description, @dueAtMs, @estMinutes, @type, @createdByEmail, @createdAt)`
+    ).run(a)
+  );
   return a;
 }
 
@@ -590,13 +968,36 @@ export function listCourseAssignmentsByCourse(courseId: string): CourseAssignmen
   return rows;
 }
 
+export function createCourseAnnouncement(announcement: CourseAnnouncement): CourseAnnouncement {
+  const db = getDb();
+  runWrite('course_announcements.insert', () =>
+    db.prepare(
+      `INSERT INTO course_announcements
+        (id, courseId, title, body, createdByEmail, createdAt)
+       VALUES
+        (@id, @courseId, @title, @body, @createdByEmail, @createdAt)`
+    ).run(announcement)
+  );
+  return announcement;
+}
+
+export function listCourseAnnouncementsByCourse(courseId: string): CourseAnnouncement[] {
+  const db = getDb();
+  const rows = db
+    .prepare('SELECT * FROM course_announcements WHERE courseId = ? ORDER BY createdAt DESC')
+    .all(courseId) as CourseAnnouncement[];
+  return rows;
+}
+
 // Grading tasks (teacher)
 
 export function createGradingTask(task: GradingTask): GradingTask {
   const db = getDb();
-  db.prepare(
-    'INSERT INTO grading_tasks (id, teacherEmail, title, dueAtMs, estMinutes, createdAt) VALUES (@id, @teacherEmail, @title, @dueAtMs, @estMinutes, @createdAt)'
-  ).run(task);
+  runWrite('grading_tasks.insert', () =>
+    db.prepare(
+      'INSERT INTO grading_tasks (id, teacherEmail, title, dueAtMs, estMinutes, createdAt) VALUES (@id, @teacherEmail, @title, @dueAtMs, @estMinutes, @createdAt)'
+    ).run(task)
+  );
   return task;
 }
 
@@ -610,7 +1011,9 @@ export function listGradingTasksByTeacher(teacherEmail: string): GradingTask[] {
 
 export function deleteGradingTask(id: string, teacherEmail: string): void {
   const db = getDb();
-  db.prepare('DELETE FROM grading_tasks WHERE id = ? AND teacherEmail = ?').run(id, teacherEmail);
+  runWrite('grading_tasks.delete', () =>
+    db.prepare('DELETE FROM grading_tasks WHERE id = ? AND teacherEmail = ?').run(id, teacherEmail)
+  );
 }
 
 const DEFAULT_PREFERENCES = {
@@ -725,50 +1128,309 @@ export function upsertPlannerPreferences(
     normalizedWeights[key] = clampInt(weight, -5, 5);
   }
 
-  db.prepare(
-    `INSERT INTO planner_preferences
-      (userEmail, studyWindowStartMin, studyWindowEndMin, maxSessionMin, breakBetweenSessionsMin, avoidLateNight, coursePriorityWeightsJson, updatedAt)
-     VALUES
-      (@userEmail, @studyWindowStartMin, @studyWindowEndMin, @maxSessionMin, @breakBetweenSessionsMin, @avoidLateNight, @coursePriorityWeightsJson, @updatedAt)
-     ON CONFLICT(userEmail) DO UPDATE SET
-      studyWindowStartMin = excluded.studyWindowStartMin,
-      studyWindowEndMin = excluded.studyWindowEndMin,
-      maxSessionMin = excluded.maxSessionMin,
-      breakBetweenSessionsMin = excluded.breakBetweenSessionsMin,
-      avoidLateNight = excluded.avoidLateNight,
-      coursePriorityWeightsJson = excluded.coursePriorityWeightsJson,
-      updatedAt = excluded.updatedAt`
-  ).run({
-    userEmail: email,
-    studyWindowStartMin,
-    studyWindowEndMin: Math.max(studyWindowEndMin, studyWindowStartMin + 1),
-    maxSessionMin,
-    breakBetweenSessionsMin,
-    avoidLateNight: update.avoidLateNight ? 1 : 0,
-    coursePriorityWeightsJson: JSON.stringify(normalizedWeights),
-    updatedAt: now,
-  });
+  runWrite('planner_preferences.upsert', () =>
+    db.prepare(
+      `INSERT INTO planner_preferences
+        (userEmail, studyWindowStartMin, studyWindowEndMin, maxSessionMin, breakBetweenSessionsMin, avoidLateNight, coursePriorityWeightsJson, updatedAt)
+       VALUES
+        (@userEmail, @studyWindowStartMin, @studyWindowEndMin, @maxSessionMin, @breakBetweenSessionsMin, @avoidLateNight, @coursePriorityWeightsJson, @updatedAt)
+       ON CONFLICT(userEmail) DO UPDATE SET
+        studyWindowStartMin = excluded.studyWindowStartMin,
+        studyWindowEndMin = excluded.studyWindowEndMin,
+        maxSessionMin = excluded.maxSessionMin,
+        breakBetweenSessionsMin = excluded.breakBetweenSessionsMin,
+        avoidLateNight = excluded.avoidLateNight,
+        coursePriorityWeightsJson = excluded.coursePriorityWeightsJson,
+        updatedAt = excluded.updatedAt`
+    ).run({
+      userEmail: email,
+      studyWindowStartMin,
+      studyWindowEndMin: Math.max(studyWindowEndMin, studyWindowStartMin + 1),
+      maxSessionMin,
+      breakBetweenSessionsMin,
+      avoidLateNight: update.avoidLateNight ? 1 : 0,
+      coursePriorityWeightsJson: JSON.stringify(normalizedWeights),
+      updatedAt: now,
+    })
+  );
 
   return getPlannerPreferences(email);
+}
+
+function parseNotificationPayload(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function rowToNotification(row: NotificationRow): NotificationRecord {
+  return {
+    id: row.id,
+    userEmail: row.userEmail,
+    type: row.type as NotificationType,
+    payload: parseNotificationPayload(row.payloadJson),
+    dedupeKey: row.dedupeKey ?? null,
+    createdAt: row.createdAt,
+    readAt: row.readAt ?? null,
+  };
+}
+
+export function createNotification(input: {
+  userEmail: string;
+  type: NotificationType;
+  payload?: Record<string, unknown> | null;
+  dedupeKey?: string | null;
+  createdAt?: string;
+}): NotificationRecord | null {
+  const db = getDb();
+  const userEmail = normalizeEmail(input.userEmail);
+  if (!userEmail) return null;
+
+  const id = randomUUID();
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const dedupeKey = input.dedupeKey?.trim() || null;
+  const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
+
+  const result = runWrite('notifications.insert', () =>
+    db.prepare(
+      `INSERT OR IGNORE INTO notifications
+        (id, userEmail, type, payloadJson, dedupeKey, createdAt, readAt)
+       VALUES
+        (@id, @userEmail, @type, @payloadJson, @dedupeKey, @createdAt, NULL)`
+    ).run({
+      id,
+      userEmail,
+      type: input.type,
+      payloadJson,
+      dedupeKey,
+      createdAt,
+    })
+  );
+
+  if (result.changes === 0) return null;
+  return {
+    id,
+    userEmail,
+    type: input.type,
+    payload: input.payload ?? null,
+    dedupeKey,
+    createdAt,
+    readAt: null,
+  };
+}
+
+export function listNotificationsByUser(userEmail: string, limit = 50): NotificationRecord[] {
+  const db = getDb();
+  const email = normalizeEmail(userEmail);
+  const safeLimit = clampInt(limit, 1, 200);
+  const rows = db.prepare(
+    `SELECT id, userEmail, type, payloadJson, dedupeKey, createdAt, readAt
+     FROM notifications
+     WHERE userEmail = ?
+     ORDER BY createdAt DESC
+     LIMIT ?`
+  ).all(email, safeLimit) as NotificationRow[];
+  return rows.map(rowToNotification);
+}
+
+export function getUnreadNotificationCount(userEmail: string): number {
+  const db = getDb();
+  const email = normalizeEmail(userEmail);
+  const row = db.prepare(
+    'SELECT COUNT(*) as c FROM notifications WHERE userEmail = ? AND readAt IS NULL'
+  ).get(email) as { c: number };
+  return row.c;
+}
+
+export function markNotificationRead(userEmail: string, notificationId: string): boolean {
+  const db = getDb();
+  const email = normalizeEmail(userEmail);
+  const now = new Date().toISOString();
+  const result = runWrite('notifications.markRead', () =>
+    db.prepare(
+      'UPDATE notifications SET readAt = ? WHERE id = ? AND userEmail = ? AND readAt IS NULL'
+    ).run(now, notificationId, email)
+  );
+  return result.changes > 0;
+}
+
+export function markAllNotificationsRead(userEmail: string): number {
+  const db = getDb();
+  const email = normalizeEmail(userEmail);
+  const now = new Date().toISOString();
+  const result = runWrite('notifications.markAllRead', () =>
+    db.prepare('UPDATE notifications SET readAt = ? WHERE userEmail = ? AND readAt IS NULL').run(now, email)
+  );
+  return result.changes;
+}
+
+export function listCourseAssignmentDueReminderCandidates(
+  minDueAtMs: number,
+  maxDueAtMs: number
+): DueReminderCandidate[] {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT
+        ca.id AS assignmentId,
+        ca.courseId AS courseId,
+        c.name AS courseName,
+        ca.title AS title,
+        ca.dueAtMs AS dueAtMs,
+        cm.studentEmail AS studentEmail
+      FROM course_assignments ca
+      INNER JOIN courses c ON c.id = ca.courseId
+      INNER JOIN course_members cm ON cm.courseId = ca.courseId
+      WHERE ca.dueAtMs IS NOT NULL
+        AND ca.dueAtMs BETWEEN ? AND ?
+      ORDER BY ca.dueAtMs ASC`
+  ).all(minDueAtMs, maxDueAtMs) as DueReminderCandidateRow[];
+  return rows.map((row) => ({
+    assignmentId: row.assignmentId,
+    courseId: row.courseId,
+    courseName: row.courseName,
+    title: row.title,
+    dueAtMs: row.dueAtMs,
+    studentEmail: row.studentEmail,
+  }));
+}
+
+export function upsertCourseFeedback(
+  courseId: string,
+  studentEmail: string,
+  rating: number,
+  comment?: string | null
+): CourseFeedbackSubmission {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const email = normalizeEmail(studentEmail);
+  const normalizedRating = clampInt(rating, 1, 5);
+  const normalizedComment = comment?.trim() ? comment.trim() : null;
+
+  runWrite('course_feedback.upsert', () =>
+    db.prepare(
+      `INSERT INTO course_feedback
+        (id, courseId, studentEmail, rating, comment, createdAt, updatedAt)
+       VALUES
+        (@id, @courseId, @studentEmail, @rating, @comment, @createdAt, @updatedAt)
+       ON CONFLICT(courseId, studentEmail) DO UPDATE SET
+        rating = excluded.rating,
+        comment = excluded.comment,
+        updatedAt = excluded.updatedAt`
+    ).run({
+      id: randomUUID(),
+      courseId,
+      studentEmail: email,
+      rating: normalizedRating,
+      comment: normalizedComment,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  const row = db.prepare(
+    'SELECT * FROM course_feedback WHERE courseId = ? AND studentEmail = ?'
+  ).get(courseId, email) as CourseFeedbackRow;
+
+  return {
+    id: row.id,
+    courseId: row.courseId,
+    studentEmail: row.studentEmail,
+    rating: row.rating,
+    comment: row.comment ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function getCourseFeedbackByStudent(
+  courseId: string,
+  studentEmail: string
+): CourseFeedbackSubmission | null {
+  const db = getDb();
+  const email = normalizeEmail(studentEmail);
+  const row = db.prepare(
+    'SELECT * FROM course_feedback WHERE courseId = ? AND studentEmail = ?'
+  ).get(courseId, email) as CourseFeedbackRow | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    courseId: row.courseId,
+    studentEmail: row.studentEmail,
+    rating: row.rating,
+    comment: row.comment ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function getCourseFeedbackSummary(courseId: string): CourseFeedbackSummary {
+  const db = getDb();
+  const stats = db.prepare(
+    'SELECT COUNT(*) as totalResponses, AVG(rating) as averageRating FROM course_feedback WHERE courseId = ?'
+  ).get(courseId) as { totalResponses: number; averageRating: number | null };
+
+  const breakdownRows = db.prepare(
+    'SELECT rating, COUNT(*) as count FROM course_feedback WHERE courseId = ? GROUP BY rating'
+  ).all(courseId) as { rating: number; count: number }[];
+  const counts = new Map<number, number>();
+  breakdownRows.forEach((row) => counts.set(row.rating, row.count));
+  const ratingBreakdown = [1, 2, 3, 4, 5].map((rating) => ({
+    rating,
+    count: counts.get(rating) ?? 0,
+  }));
+
+  const recentCommentsRows = db.prepare(
+    `SELECT rating, comment, updatedAt
+     FROM course_feedback
+     WHERE courseId = ? AND comment IS NOT NULL AND LENGTH(TRIM(comment)) > 0
+     ORDER BY updatedAt DESC
+     LIMIT 8`
+  ).all(courseId) as { rating: number; comment: string; updatedAt: string }[];
+
+  return {
+    courseId,
+    totalResponses: stats.totalResponses ?? 0,
+    averageRating: stats.averageRating == null
+      ? null
+      : Math.round((stats.averageRating + Number.EPSILON) * 100) / 100,
+    ratingBreakdown,
+    recentComments: recentCommentsRows.map((row) => ({
+      rating: row.rating,
+      comment: row.comment,
+      createdAt: row.updatedAt,
+    })),
+  };
 }
 
 // Support Hub repository
 
 export function createHelpRequest(req: HelpRequest): HelpRequest {
   const db = getDb();
-  db.prepare(
-    `INSERT INTO help_requests
-      (id, title, description, subject, urgency, status, createdAt, claimedBy, claimedByEmail, linkedAssignmentId, closedAt, createdByEmail)
-     VALUES
-      (@id, @title, @description, @subject, @urgency, @status, @createdAt, @claimedBy, @claimedByEmail, @linkedAssignmentId, @closedAt, @createdByEmail)`
-  ).run({
-    ...req,
-    claimedBy: req.claimedBy ?? null,
-    claimedByEmail: req.claimedByEmail ?? null,
-    linkedAssignmentId: req.linkedAssignmentId ?? null,
-    closedAt: req.closedAt ?? null,
-    createdByEmail: req.createdByEmail ?? null,
-  });
+  runWrite('help_requests.insert', () =>
+    db.prepare(
+      `INSERT INTO help_requests
+        (id, title, description, subject, urgency, status, createdAt, claimMode, meetingAbout, meetingLocation, meetingLink, proposedTimes, claimedBy, claimedByEmail, linkedAssignmentId, closedAt, createdByEmail)
+       VALUES
+        (@id, @title, @description, @subject, @urgency, @status, @createdAt, @claimMode, @meetingAbout, @meetingLocation, @meetingLink, @proposedTimes, @claimedBy, @claimedByEmail, @linkedAssignmentId, @closedAt, @createdByEmail)`
+    ).run({
+      ...req,
+      claimMode: req.claimMode ?? 'any',
+      meetingAbout: req.meetingAbout ?? null,
+      meetingLocation: req.meetingLocation ?? null,
+      meetingLink: req.meetingLink ?? null,
+      proposedTimes: req.proposedTimes ?? null,
+      claimedBy: req.claimedBy ?? null,
+      claimedByEmail: req.claimedByEmail ?? null,
+      linkedAssignmentId: req.linkedAssignmentId ?? null,
+      closedAt: req.closedAt ?? null,
+      createdByEmail: req.createdByEmail ?? null,
+    })
+  );
 
   return req;
 }
@@ -817,6 +1479,11 @@ function rowToHelpRequest(row: HelpRequestRow): HelpRequest {
     urgency: row.urgency as HelpRequest['urgency'],
     status: row.status as HelpRequest['status'],
     createdAt: row.createdAt,
+    claimMode: (row.claimMode as HelpRequest['claimMode']) ?? 'any',
+    meetingAbout: row.meetingAbout ?? null,
+    meetingLocation: row.meetingLocation ?? null,
+    meetingLink: row.meetingLink ?? null,
+    proposedTimes: row.proposedTimes ?? null,
     claimedBy: row.claimedBy ?? null,
     claimedByEmail: row.claimedByEmail ?? null,
     claimedAt: row.claimedAt ?? null,
@@ -866,9 +1533,11 @@ export function claimHelpRequest(
 ): HelpRequest | null {
   const db = getDb();
   const now = new Date().toISOString();
-  const result = db.prepare(
-    'UPDATE help_requests SET status = ?, claimedBy = ?, claimedByEmail = ?, claimedAt = ? WHERE id = ? AND status = ?'
-  ).run('claimed', claimedBy, claimedByEmail, now, id, 'open');
+  const result = runWrite('help_requests.claim', () =>
+    db.prepare(
+      'UPDATE help_requests SET status = ?, claimedBy = ?, claimedByEmail = ?, claimedAt = ? WHERE id = ? AND status = ?'
+    ).run('claimed', claimedBy, claimedByEmail, now, id, 'open')
+  );
   if (result.changes === 0) return null;
   recordClaimEvent(id, claimedByEmail);
   return getHelpRequestById(id);
@@ -879,9 +1548,11 @@ export function unclaimHelpRequest(id: string): HelpRequest | null {
   const now = new Date().toISOString();
   const row = db.prepare('SELECT claimedByEmail FROM help_requests WHERE id = ? AND status = ?').get(id, 'claimed') as { claimedByEmail: string | null } | undefined;
   const unclaimedBy = row?.claimedByEmail ?? null;
-  db.prepare(
-    'UPDATE help_requests SET status = ?, claimedBy = NULL, claimedByEmail = NULL, claimedAt = NULL, unclaimedAt = ?, unclaimedByEmail = ? WHERE id = ? AND status = ?'
-  ).run('open', now, unclaimedBy, id, 'claimed');
+  runWrite('help_requests.unclaim', () =>
+    db.prepare(
+      'UPDATE help_requests SET status = ?, claimedBy = NULL, claimedByEmail = NULL, claimedAt = NULL, unclaimedAt = ?, unclaimedByEmail = ? WHERE id = ? AND status = ?'
+    ).run('open', now, unclaimedBy, id, 'claimed')
+  );
 
   return getHelpRequestById(id);
 }
@@ -889,10 +1560,12 @@ export function unclaimHelpRequest(id: string): HelpRequest | null {
 export function closeHelpRequest(id: string): HelpRequest | null {
   const db = getDb();
   const now = new Date().toISOString();
-  db.prepare('UPDATE help_requests SET status = ?, closedAt = ? WHERE id = ?').run(
-    'closed',
-    now,
-    id
+  runWrite('help_requests.close', () =>
+    db.prepare('UPDATE help_requests SET status = ?, closedAt = ? WHERE id = ?').run(
+      'closed',
+      now,
+      id
+    )
   );
   return getHelpRequestById(id);
 }
@@ -910,10 +1583,14 @@ export function deleteAllClosedRequests(
 
   let deletedComments = 0;
   for (const row of rows) {
-    const commentRows = db.prepare('DELETE FROM help_comments WHERE requestId = ?').run(row.id);
+    const commentRows = runWrite('help_comments.cleanupByRequest', () =>
+      db.prepare('DELETE FROM help_comments WHERE requestId = ?').run(row.id)
+    );
     deletedComments += commentRows.changes;
   }
-  const reqResult = db.prepare('DELETE FROM help_requests WHERE status = ?').run('closed');
+  const reqResult = runWrite('help_requests.cleanupAllClosed', () =>
+    db.prepare('DELETE FROM help_requests WHERE status = ?').run('closed')
+  );
 
   if (logger) {
     logger.info(
@@ -941,14 +1618,18 @@ export function deleteClosedRequestsOlderThanDays(
 
   let deletedComments = 0;
   for (const row of rows) {
-    const commentRows = db.prepare('DELETE FROM help_comments WHERE requestId = ?').run(row.id);
+    const commentRows = runWrite('help_comments.cleanupOlderThanDays', () =>
+      db.prepare('DELETE FROM help_comments WHERE requestId = ?').run(row.id)
+    );
     deletedComments += commentRows.changes;
   }
-  const reqResult = db
-    .prepare(
-      'DELETE FROM help_requests WHERE status = ? AND closedAt IS NOT NULL AND closedAt < ?'
-    )
-    .run('closed', cutoffIso);
+  const reqResult = runWrite('help_requests.cleanupOlderThanDays', () =>
+    db
+      .prepare(
+        'DELETE FROM help_requests WHERE status = ? AND closedAt IS NOT NULL AND closedAt < ?'
+      )
+      .run('closed', cutoffIso)
+  );
 
   if (logger) {
     logger.info(
@@ -980,16 +1661,18 @@ export function listCommentsForRequest(requestId: string): HelpComment[] {
 
 export function addComment(comment: HelpComment): HelpComment {
   const db = getDb();
-  db.prepare(
-    `INSERT INTO help_comments
-      (id, requestId, authorLabel, authorDisplayName, authorEmail, body, createdAt)
-     VALUES
-      (@id, @requestId, @authorLabel, @authorDisplayName, @authorEmail, @body, @createdAt)`
-  ).run({
-    ...comment,
-    authorDisplayName: comment.authorDisplayName ?? null,
-    authorEmail: comment.authorEmail ?? null,
-  });
+  runWrite('help_comments.insert', () =>
+    db.prepare(
+      `INSERT INTO help_comments
+        (id, requestId, authorLabel, authorDisplayName, authorEmail, body, createdAt)
+       VALUES
+        (@id, @requestId, @authorLabel, @authorDisplayName, @authorEmail, @body, @createdAt)`
+    ).run({
+      ...comment,
+      authorDisplayName: comment.authorDisplayName ?? null,
+      authorEmail: comment.authorEmail ?? null,
+    })
+  );
 
   return comment;
 }
@@ -1019,9 +1702,11 @@ export function recordClaimEvent(requestId: string, claimedByEmail: string): voi
   const db = getDb();
   const id = randomUUID();
   const now = new Date().toISOString();
-  db.prepare(
-    'INSERT INTO help_claim_events (id, requestId, claimedByEmail, claimedAt) VALUES (?, ?, ?, ?)'
-  ).run(id, requestId, claimedByEmail, now);
+  runWrite('help_claim_events.insert', () =>
+    db.prepare(
+      'INSERT INTO help_claim_events (id, requestId, claimedByEmail, claimedAt) VALUES (?, ?, ?, ?)'
+    ).run(id, requestId, claimedByEmail, now)
+  );
 }
 
 export function isBlocked(email: string): boolean {
@@ -1036,9 +1721,11 @@ export function isBlocked(email: string): boolean {
 
 export function addBlocklistEntry(entry: ClaimBlocklistEntry): void {
   const db = getDb();
-  db.prepare(
-    'INSERT INTO claim_blocklist (id, blockedEmail, blockedUntil, blockedByEmail, createdAt) VALUES (@id, @blockedEmail, @blockedUntil, @blockedByEmail, @createdAt)'
-  ).run(entry);
+  runWrite('claim_blocklist.insert', () =>
+    db.prepare(
+      'INSERT INTO claim_blocklist (id, blockedEmail, blockedUntil, blockedByEmail, createdAt) VALUES (@id, @blockedEmail, @blockedUntil, @blockedByEmail, @createdAt)'
+    ).run(entry)
+  );
 }
 
 export function listBlocklistEntries(): ClaimBlocklistEntry[] {
@@ -1059,13 +1746,15 @@ export function listBlocklistEntries(): ClaimBlocklistEntry[] {
 
 export function createReport(report: HelpReport): HelpReport {
   const db = getDb();
-  db.prepare(
-    `INSERT INTO help_reports (id, requestId, reportedEmail, reason, details, reportedByEmail, createdAt)
-     VALUES (@id, @requestId, @reportedEmail, @reason, @details, @reportedByEmail, @createdAt)`
-  ).run({
-    ...report,
-    details: report.details ?? null,
-  });
+  runWrite('help_reports.insert', () =>
+    db.prepare(
+      `INSERT INTO help_reports (id, requestId, reportedEmail, reason, details, reportedByEmail, createdAt)
+       VALUES (@id, @requestId, @reportedEmail, @reason, @details, @reportedByEmail, @createdAt)`
+    ).run({
+      ...report,
+      details: report.details ?? null,
+    })
+  );
   return report;
 }
 

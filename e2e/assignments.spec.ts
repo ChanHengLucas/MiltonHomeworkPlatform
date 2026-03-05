@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { setDevIdentity } from './devIdentity';
 
 test.describe('Assignments flow', () => {
   test('create assignment, verify due date, persist after refresh', async ({ page }) => {
+    // Set Student A via dev identity storage and reload.
+    await setDevIdentity(page, 'student-a');
     await page.goto('/assignments');
-
-    // Set Student A via Dev Identity Switcher
-    await page.selectOption('.dev-identity-select', 'student-a');
-    await expect(page.locator('.dev-identity-current')).toContainText('lucas12@milton.edu');
 
     // Fill confirm form (skip parse - fill directly)
     const confirmCard = page.locator('.ui-card').filter({ hasText: 'Personal assignment details' });

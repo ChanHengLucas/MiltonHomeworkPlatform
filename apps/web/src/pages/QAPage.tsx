@@ -220,7 +220,7 @@ export function QAPage() {
       <Card>
         <h2 className="section-title">3. Run Demo Tests</h2>
         <p style={{ marginBottom: '1rem', color: 'var(--color-text-muted)' }}>
-          Run these in order after seeding. Switch identity via header dropdown.
+          Run these in order after seeding. Identity switches are handled automatically by these actions.
         </p>
         <div className="qa-test-list">
           <div className="qa-test-row">
@@ -261,7 +261,7 @@ export function QAPage() {
       <Card>
         <h2 className="section-title">Current Identity</h2>
         <p style={{ margin: 0, color: 'var(--color-text-muted)' }}>
-          {schoolEmail || '(none)'} — Use Dev Identity dropdown in header to switch.
+          {schoolEmail || '(none)'} — Manual identity override is available on <code>/dev</code>.
         </p>
       </Card>
     </div>

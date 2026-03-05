@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { api, type AvailabilityBlock } from '../api';
 import { useAppState } from '../context/AppContext';
 import { Button, Card, Callout } from '../components/ui';
+import { useAuthGate } from '../hooks/useAuthGate';
 
 const MINUTES_PER_DAY = 24 * 60;
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -29,6 +30,7 @@ function formatBlockTime(label: string, startMin: number, endMin: number): strin
 
 export function AvailabilityPage() {
   const { calendarBusyBlocks, calendarBusyUpdatedAt, setCalendarBusyBlocks } = useAppState();
+  const { isSignedIn } = useAuthGate();
   const [blocks, setBlocks] = useState<AvailabilityBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,10 +41,17 @@ export function AvailabilityPage() {
   const [endTime, setEndTime] = useState('22:00');
 
   useEffect(() => {
+    if (!isSignedIn) {
+      setLoading(false);
+      setBlocks([]);
+      setError(null);
+      return;
+    }
     load();
-  }, []);
+  }, [isSignedIn]);
 
   async function load() {
+    if (!isSignedIn) return;
     try {
       setLoading(true);
       setError(null);
@@ -63,6 +72,7 @@ export function AvailabilityPage() {
   }
 
   async function handleAdd() {
+    if (!isSignedIn) return;
     const startParts = parseTimeStr(startTime);
     const endParts = parseTimeStr(endTime);
     const start = toStartMin(dayIndex, startParts.hour, startParts.minute);
@@ -83,6 +93,7 @@ export function AvailabilityPage() {
   }
 
   async function handleImportBusy() {
+    if (!isSignedIn) return;
     try {
       setImporting(true);
       setError(null);
@@ -103,6 +114,7 @@ export function AvailabilityPage() {
   }
 
   async function handleDelete(id: string) {
+    if (!isSignedIn) return;
     try {
       await api.deleteAvailability(id);
       load();

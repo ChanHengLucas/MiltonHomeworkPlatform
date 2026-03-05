@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 
 import { api, type HelpRequest, type HelpComment, type RequestActivityEntry } from '../api';
 import { useAppState } from '../context/AppContext';
+import { useAuthGate } from '../hooks/useAuthGate';
 import { isTeacherEligible } from '../utils/identity';
 import { Button, Card, Callout, Modal } from '../components/ui';
 
@@ -18,6 +19,7 @@ function statusClass(value: string): string {
 
 export function SupportDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { isSignedIn } = useAuthGate();
   const { suggestedClaimName, schoolEmail } = useAppState();
   const [request, setRequest] = useState<HelpRequest | null>(null);
   const [comments, setComments] = useState<HelpComment[]>([]);
@@ -35,7 +37,7 @@ export function SupportDetailPage() {
   const [reportDetails, setReportDetails] = useState('');
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id || !isSignedIn) return;
     try {
       setLoading(true);
       setError(null);
@@ -61,11 +63,20 @@ export function SupportDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, isSignedIn]);
 
   useEffect(() => {
+    if (!isSignedIn) {
+      setLoading(false);
+      setRequest(null);
+      setComments([]);
+      setActivity([]);
+      setError(null);
+      setNotAvailable(false);
+      return;
+    }
     load();
-  }, [load]);
+  }, [isSignedIn, load]);
 
   useEffect(() => {
     if (success) {
@@ -79,6 +90,7 @@ export function SupportDetailPage() {
   }, [suggestedClaimName]);
 
   async function handleClaim() {
+    if (!isSignedIn) return;
     if (!id || !claimName.trim()) {
       setError('Enter your name to claim');
       return;
@@ -99,6 +111,7 @@ export function SupportDetailPage() {
   }
 
   async function handleUnclaim() {
+    if (!isSignedIn) return;
     if (!id) return;
     try {
       setActionLoading('unclaim');
@@ -115,6 +128,7 @@ export function SupportDetailPage() {
   }
 
   async function handleClose() {
+    if (!isSignedIn) return;
     if (!id) return;
     try {
       setActionLoading('close');
@@ -130,6 +144,7 @@ export function SupportDetailPage() {
   }
 
   async function handleAddComment() {
+    if (!isSignedIn) return;
     if (!id || !commentBody.trim()) return;
     try {
       setActionLoading('comment');
@@ -145,6 +160,7 @@ export function SupportDetailPage() {
   }
 
   async function handleReport() {
+    if (!isSignedIn) return;
     if (!id) return;
     try {
       setActionLoading('report');
@@ -172,9 +188,16 @@ export function SupportDetailPage() {
   const isRequester = userEmail && creatorEmail && userEmail === creatorEmail;
   const isClaimer = userEmail && claimerEmail && userEmail === claimerEmail;
   const isTeacher = userEmail && isTeacherEligible(userEmail);
+  const claimRestrictedToTeachers = request?.claimMode === 'teacher_only' && !isTeacher;
   const canClose = request && request.status !== 'closed' && (isRequester || isTeacher);
   const canUnclaim = request && request.status === 'claimed' && (isClaimer || isRequester || isTeacher);
   const canReport = request && request.status === 'claimed' && (isRequester || isTeacher);
+  const requesterMailto = request?.createdByEmail
+    ? `mailto:${encodeURIComponent(request.createdByEmail)}?subject=${encodeURIComponent(`Support request: ${request.title}`)}`
+    : null;
+  const helperMailto = request?.claimedByEmail
+    ? `mailto:${encodeURIComponent(request.claimedByEmail)}?subject=${encodeURIComponent(`Support request: ${request.title}`)}`
+    : null;
 
   if (!id) return null;
   if (loading) return <p>Loading…</p>;
@@ -232,6 +255,27 @@ export function SupportDetailPage() {
         </div>
         <p style={{ whiteSpace: 'pre-wrap' }}>{request.description}</p>
 
+        {(request.meetingAbout || request.meetingLocation || request.meetingLink || request.proposedTimes) && (
+          <div style={{ marginTop: '0.85rem' }}>
+            <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '0.98rem' }}>Meeting details</h3>
+            {request.meetingAbout && <p style={{ margin: '0.15rem 0' }}><strong>For:</strong> {request.meetingAbout}</p>}
+            {request.meetingLocation && <p style={{ margin: '0.15rem 0' }}><strong>Location:</strong> {request.meetingLocation}</p>}
+            {request.meetingLink && (
+              <p style={{ margin: '0.15rem 0' }}>
+                <strong>Link:</strong>{' '}
+                <a href={request.meetingLink} target="_blank" rel="noreferrer" className="link">
+                  {request.meetingLink}
+                </a>
+              </p>
+            )}
+            {request.proposedTimes && (
+              <p style={{ margin: '0.15rem 0', whiteSpace: 'pre-wrap' }}>
+                <strong>Proposed times:</strong> {request.proposedTimes}
+              </p>
+            )}
+          </div>
+        )}
+
         {request.linkedAssignmentId && (
           <p style={{ marginTop: '0.75rem' }}>
             <Link to="/assignments" className="link">View linked assignment →</Link>
@@ -243,6 +287,8 @@ export function SupportDetailPage() {
             <>
               {isOwnRequest ? (
                 <span className="form-hint">You can&apos;t claim your own request.</span>
+              ) : claimRestrictedToTeachers ? (
+                <span className="form-hint">This request is restricted to teacher/tutor claims.</span>
               ) : (
                 <>
                   <input
@@ -258,6 +304,12 @@ export function SupportDetailPage() {
                 </>
               )}
             </>
+          )}
+          {requesterMailto && (
+            <a className="link" href={requesterMailto}>Email requester</a>
+          )}
+          {helperMailto && (
+            <a className="link" href={helperMailto}>Email helper</a>
           )}
           {canUnclaim && (
             <Button

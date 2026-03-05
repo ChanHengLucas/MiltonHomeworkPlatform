@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { api, type HelpRequest } from '../api';
 import { Button, Card, Callout } from '../components/ui';
+import { useAuthGate } from '../hooks/useAuthGate';
 
 function urgencyLabel(value: string): string {
   return value === 'med' ? 'Medium' : value.charAt(0).toUpperCase() + value.slice(1);
@@ -20,6 +21,7 @@ function statusClass(value: string): string {
 
 export function SupportPage() {
   const navigate = useNavigate();
+  const { isSignedIn } = useAuthGate();
   const [searchParams] = useSearchParams();
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +31,11 @@ export function SupportPage() {
     description: '',
     subject: '',
     urgency: 'med' as 'low' | 'med' | 'high',
+    claimMode: 'any' as 'any' | 'teacher_only',
+    meetingAbout: '',
+    meetingLocation: '',
+    meetingLink: '',
+    proposedTimes: '',
   });
   const [filterSubject, setFilterSubject] = useState('');
   const [filterUrgency, setFilterUrgency] = useState('');
@@ -49,11 +56,18 @@ export function SupportPage() {
   }, [isNew, prefilledTitle]);
 
   useEffect(() => {
+    if (!isSignedIn) {
+      setLoading(false);
+      setRequests([]);
+      setError(null);
+      return;
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterSubject, filterUrgency, filterStatus]);
+  }, [filterSubject, filterUrgency, filterStatus, isSignedIn]);
 
   async function load() {
+    if (!isSignedIn) return;
     try {
       setLoading(true);
       setError(null);
@@ -74,6 +88,7 @@ export function SupportPage() {
   }
 
   async function handleCreate() {
+    if (!isSignedIn) return;
     if (!createForm.title.trim() || !createForm.description.trim() || !createForm.subject.trim()) {
       setError('Title, description, and subject are required');
       return;
@@ -83,8 +98,22 @@ export function SupportPage() {
       await api.createRequest({
         ...createForm,
         linkedAssignmentId: prefilledLinkedId || undefined,
+        meetingAbout: createForm.meetingAbout.trim() || null,
+        meetingLocation: createForm.meetingLocation.trim() || null,
+        meetingLink: createForm.meetingLink.trim() || null,
+        proposedTimes: createForm.proposedTimes.trim() || null,
       });
-      setCreateForm({ title: '', description: '', subject: '', urgency: 'med' });
+      setCreateForm({
+        title: '',
+        description: '',
+        subject: '',
+        urgency: 'med',
+        claimMode: 'any',
+        meetingAbout: '',
+        meetingLocation: '',
+        meetingLink: '',
+        proposedTimes: '',
+      });
       console.log('[Planner][API] Created support request');
       load();
       navigate('/support');
@@ -145,6 +174,54 @@ export function SupportPage() {
               <option value="med">Medium</option>
               <option value="high">High</option>
             </select>
+          </div>
+          <div className="form-group">
+            <label>Who can claim</label>
+            <select
+              className="ui-select"
+              value={createForm.claimMode}
+              onChange={(e) => setCreateForm((f) => ({ ...f, claimMode: e.target.value as 'any' | 'teacher_only' }))}
+            >
+              <option value="any">Any student helper</option>
+              <option value="teacher_only">Teachers/tutors only</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Meeting for (optional)</label>
+            <input
+              className="ui-input"
+              value={createForm.meetingAbout}
+              onChange={(e) => setCreateForm((f) => ({ ...f, meetingAbout: e.target.value }))}
+              placeholder="e.g. Algebra test review"
+            />
+          </div>
+          <div className="form-group">
+            <label>Location (optional)</label>
+            <input
+              className="ui-input"
+              value={createForm.meetingLocation}
+              onChange={(e) => setCreateForm((f) => ({ ...f, meetingLocation: e.target.value }))}
+              placeholder="Library table 4 / Room 201"
+            />
+          </div>
+          <div className="form-group form-group-wide">
+            <label>Meeting link (optional)</label>
+            <input
+              className="ui-input"
+              value={createForm.meetingLink}
+              onChange={(e) => setCreateForm((f) => ({ ...f, meetingLink: e.target.value }))}
+              placeholder="https://zoom.us/j/..."
+            />
+          </div>
+          <div className="form-group form-group-wide">
+            <label>Proposed times (optional)</label>
+            <textarea
+              className="ui-textarea"
+              value={createForm.proposedTimes}
+              onChange={(e) => setCreateForm((f) => ({ ...f, proposedTimes: e.target.value }))}
+              placeholder="Mon 4:00-4:30 PM, Tue lunch, Wed after school"
+              style={{ minHeight: 80 }}
+            />
           </div>
         </div>
         <Button onClick={handleCreate} className="btn-primary-large">
@@ -239,6 +316,7 @@ export function SupportPage() {
                   <span>{r.subject}</span>
                   <span>·</span>
                   <span>{urgencyLabel(r.urgency)}</span>
+                  {r.claimMode === 'teacher_only' ? ' · Teacher/tutor-only' : ''}
                   {r.createdByEmail ? ` · ${r.createdByEmail}` : ''}
                   {r.linkedAssignmentId ? ' · Linked' : ''}
                 </div>

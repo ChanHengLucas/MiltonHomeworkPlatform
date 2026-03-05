@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, type CourseAssignment, type GradingTask } from '../api';
 import { useAppState } from '../context/AppContext';
 import { Button, Card, Callout } from '../components/ui';
+import { useAuthGate } from '../hooks/useAuthGate';
 import { fromDateTimeLocalValue, formatDueDate, toDateTimeLocalValue } from '../utils/datetime';
 
 interface Course {
@@ -39,6 +40,7 @@ function defaultPublishForm(courseId: string): PublishForm {
 
 export function TeacherDashboardPage() {
   const { teacherEligible } = useAppState();
+  const { isSignedIn } = useAuthGate();
   const [courses, setCourses] = useState<Course[]>([]);
   const [courseMembers, setCourseMembers] = useState<Record<string, string[]>>({});
   const [courseAssignments, setCourseAssignments] = useState<Record<string, CourseAssignment[]>>({});
@@ -54,10 +56,20 @@ export function TeacherDashboardPage() {
   const [newGradingEst, setNewGradingEst] = useState('60');
 
   useEffect(() => {
+    if (!isSignedIn) {
+      setLoading(false);
+      setCourses([]);
+      setCourseAssignments({});
+      setCourseMembers({});
+      setGradingTasks([]);
+      setError(null);
+      return;
+    }
     load();
-  }, []);
+  }, [isSignedIn]);
 
   async function load() {
+    if (!isSignedIn) return;
     try {
       setLoading(true);
       setError(null);
@@ -83,6 +95,7 @@ export function TeacherDashboardPage() {
   }
 
   useEffect(() => {
+    if (!isSignedIn) return;
     if (courses.length === 0) {
       setCourseAssignments({});
       setCourseMembers({});
@@ -111,9 +124,10 @@ export function TeacherDashboardPage() {
       .catch(() => {
         setCourseMembers({});
       });
-  }, [courses]);
+  }, [courses, isSignedIn]);
 
   async function handleCreateCourse() {
+    if (!isSignedIn) return;
     if (!newCourseName.trim()) {
       setError('Course name is required.');
       return;
@@ -129,6 +143,7 @@ export function TeacherDashboardPage() {
   }
 
   async function handleInvite(courseId: string) {
+    if (!isSignedIn) return;
     const raw = inviteEmails[courseId]?.trim();
     if (!raw) {
       setError('Enter at least one student email to invite.');
@@ -150,6 +165,7 @@ export function TeacherDashboardPage() {
   }
 
   async function handlePublishAssignment(courseId: string) {
+    if (!isSignedIn) return;
     const form = assignForm[courseId] ?? defaultPublishForm(courseId);
     if (!form.title.trim()) {
       setError('Assignment title is required.');
@@ -179,6 +195,7 @@ export function TeacherDashboardPage() {
   }
 
   async function handleCreateGradingTask() {
+    if (!isSignedIn) return;
     if (!newGradingTitle.trim()) {
       setError('Grading task title is required.');
       return;
@@ -207,6 +224,7 @@ export function TeacherDashboardPage() {
   }
 
   async function handleDeleteGrading(id: string) {
+    if (!isSignedIn) return;
     try {
       await api.deleteGradingTask(id);
       await load();

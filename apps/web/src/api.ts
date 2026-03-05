@@ -1,11 +1,38 @@
 const API_BASE = '/api';
 const STORAGE_KEY_EMAIL = 'planner_school_email';
 const STORAGE_KEY_DISPLAY_NAME = 'planner_display_name';
+type ApiAuthStatus = 'loading' | 'signed_in' | 'signed_out';
+let apiAuthStatus: ApiAuthStatus = 'loading';
+let apiAuthMode: 'dev' | 'google' | null = null;
+const PUBLIC_PATHS = new Set([
+  '/health',
+  '/auth/me',
+  '/auth/google/start',
+  '/auth/google/callback',
+]);
+
+if (typeof window !== 'undefined') {
+  // Helps debug proxy/path issues quickly in browser devtools.
+  // eslint-disable-next-line no-console
+  console.info(`[Web] API base configured: ${API_BASE}`);
+}
+
+export function setApiAuthStatus(status: ApiAuthStatus): void {
+  apiAuthStatus = status;
+}
+
+export function setApiAuthMode(mode: 'dev' | 'google' | null): void {
+  apiAuthMode = mode;
+}
 
 function getIdentityHeaders(): Record<string, string> {
+  if (!import.meta.env.DEV || apiAuthMode === 'google') {
+    return {};
+  }
   try {
     const email = localStorage.getItem(STORAGE_KEY_EMAIL) || '';
     const name = localStorage.getItem(STORAGE_KEY_DISPLAY_NAME) || '';
+    if (!email) return {};
     const headers: Record<string, string> = {};
     if (email) headers['X-User-Email'] = email;
     if (name) headers['X-User-Name'] = name;
@@ -15,21 +42,55 @@ function getIdentityHeaders(): Record<string, string> {
   }
 }
 
+function hasDevIdentity(identityHeaders: Record<string, string>): boolean {
+  return typeof identityHeaders['X-User-Email'] === 'string' && identityHeaders['X-User-Email'].trim().length > 0;
+}
+
+function isPublicPath(path: string): boolean {
+  const normalized = path.startsWith('/api/') ? path.slice('/api'.length) : path;
+  return PUBLIC_PATHS.has(normalized);
+}
+
+function makeSignedOutError(message = 'Not authenticated'): Error & { status?: number; rawMessage?: string } {
+  const err = new Error(message) as Error & { status?: number; rawMessage?: string };
+  err.status = 401;
+  err.rawMessage = message;
+  return err;
+}
+
+function notifySignedOut(): void {
+  apiAuthStatus = 'signed_out';
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('planner:auth-required'));
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
   const identityHeaders = getIdentityHeaders();
-  const res = await fetch(url, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...identityHeaders,
-      ...options.headers,
-    },
-  });
+  if (apiAuthStatus === 'signed_out' && !hasDevIdentity(identityHeaders) && !isPublicPath(path)) {
+    throw makeSignedOutError();
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...identityHeaders,
+        ...options.headers,
+      },
+    });
+  } catch (cause) {
+    const err = new Error('API offline or proxy misconfigured') as Error & { status?: number; cause?: unknown };
+    err.status = 0;
+    err.cause = cause;
+    throw err;
+  }
 
   const text = await res.text();
   let data: unknown;
@@ -40,13 +101,46 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const msg =
+    const responseMode =
+      typeof data === 'object'
+      && data !== null
+      && 'mode' in data
+      && ((data as { mode?: unknown }).mode === 'dev' || (data as { mode?: unknown }).mode === 'google')
+        ? (data as { mode: 'dev' | 'google' }).mode
+        : undefined;
+    const requestIdFromBody =
+      typeof data === 'object'
+      && data !== null
+      && 'requestId' in data
+      && typeof (data as { requestId?: unknown }).requestId === 'string'
+        ? (data as { requestId: string }).requestId
+        : '';
+    const requestId = res.headers.get('x-request-id') || requestIdFromBody;
+    const rawMessage =
       (typeof data === 'object' && data !== null && 'error' in data && typeof (data as { error: unknown }).error === 'string')
         ? (data as { error: string }).error
         : `Request failed: ${res.status} ${res.statusText}`;
-    console.error('[API]', path, res.status, msg);
-    const err = new Error(msg) as Error & { status?: number };
+    const normalized = rawMessage.toLowerCase();
+    const isDbFailure =
+      normalized.includes('disk i/o')
+      || normalized.includes('sqlite')
+      || normalized.includes('database is locked')
+      || normalized.includes('sqlstate');
+    const msg = isDbFailure
+      ? `Database write failed — check server logs${requestId ? ` (request id: ${requestId})` : ''}`
+      : rawMessage;
+    const isAuthMePath = path === '/auth/me' || path === '/api/auth/me';
+    if (res.status === 401 && !isAuthMePath && !hasDevIdentity(identityHeaders)) {
+      notifySignedOut();
+    }
+    if (!(res.status === 401 && isAuthMePath)) {
+      console.error('[API]', path, res.status, msg, requestId ? { requestId } : undefined);
+    }
+    const err = new Error(msg) as Error & { status?: number; requestId?: string; rawMessage?: string; mode?: 'dev' | 'google' };
     err.status = res.status;
+    err.requestId = requestId || undefined;
+    err.rawMessage = rawMessage;
+    err.mode = responseMode;
     throw err;
   }
 
@@ -58,20 +152,34 @@ export interface AuthUser {
   name: string;
   picture: string | null;
   isTeacher: boolean;
+  mode?: 'dev' | 'google';
+  authenticated?: boolean;
 }
 
 async function authRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const url = path.startsWith('/') ? path : `/${path}`;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const url = `${API_BASE}${normalizedPath}`;
   const identityHeaders = getIdentityHeaders();
-  const res = await fetch(url, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...identityHeaders,
-      ...options.headers,
-    },
-  });
+  if (apiAuthStatus === 'signed_out' && !hasDevIdentity(identityHeaders) && !isPublicPath(normalizedPath)) {
+    throw makeSignedOutError();
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...identityHeaders,
+        ...options.headers,
+      },
+    });
+  } catch (cause) {
+    const err = new Error('API offline or proxy misconfigured') as Error & { status?: number; cause?: unknown };
+    err.status = 0;
+    err.cause = cause;
+    throw err;
+  }
   const text = await res.text();
   let data: unknown;
   try {
@@ -80,12 +188,23 @@ async function authRequest<T>(path: string, options: RequestInit = {}): Promise<
     data = text;
   }
   if (!res.ok) {
+    const responseMode =
+      typeof data === 'object'
+      && data !== null
+      && 'mode' in data
+      && ((data as { mode?: unknown }).mode === 'dev' || (data as { mode?: unknown }).mode === 'google')
+        ? (data as { mode: 'dev' | 'google' }).mode
+        : undefined;
     const msg =
       (typeof data === 'object' && data !== null && 'error' in data && typeof (data as { error: unknown }).error === 'string')
         ? (data as { error: string }).error
         : `Request failed: ${res.status} ${res.statusText}`;
-    const err = new Error(msg) as Error & { status?: number };
+    if (res.status === 401 && normalizedPath !== '/auth/me' && !hasDevIdentity(identityHeaders)) {
+      notifySignedOut();
+    }
+    const err = new Error(msg) as Error & { status?: number; mode?: 'dev' | 'google' };
     err.status = res.status;
+    err.mode = responseMode;
     throw err;
   }
   return data as T;
@@ -119,6 +238,60 @@ export interface CourseAssignment {
   createdByEmail: string;
   createdAt: string;
   courseName?: string;
+}
+
+export interface PlannerCourse {
+  id: string;
+  name: string;
+  courseCode: string;
+  teacherEmail: string;
+  createdAt: string;
+}
+
+export interface CourseAnnouncement {
+  id: string;
+  courseId: string;
+  title: string;
+  body: string;
+  createdByEmail: string;
+  createdAt: string;
+}
+
+export interface CourseFeedbackSubmission {
+  id: string;
+  courseId: string;
+  studentEmail: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CourseFeedbackSummary {
+  courseId: string;
+  totalResponses: number;
+  averageRating: number | null;
+  ratingBreakdown: { rating: number; count: number }[];
+  recentComments: { rating: number; comment: string; createdAt: string }[];
+}
+
+export type NotificationType =
+  | 'assignment_posted'
+  | 'request_claimed'
+  | 'request_unclaimed'
+  | 'request_closed'
+  | 'request_comment'
+  | 'due_reminder_24h'
+  | 'due_reminder_6h';
+
+export interface NotificationRecord {
+  id: string;
+  userEmail: string;
+  type: NotificationType;
+  payload: Record<string, unknown> | null;
+  dedupeKey: string | null;
+  createdAt: string;
+  readAt: string | null;
 }
 
 export interface GradingTask {
@@ -166,6 +339,11 @@ export interface HelpRequest {
   urgency: string;
   status: string;
   createdAt: string;
+  claimMode?: 'any' | 'teacher_only' | null;
+  meetingAbout?: string | null;
+  meetingLocation?: string | null;
+  meetingLink?: string | null;
+  proposedTimes?: string | null;
   claimedBy?: string | null;
   claimedByEmail?: string | null;
   claimedAt?: string | null;
@@ -200,6 +378,7 @@ export interface RequestsSummaryRow {
 }
 
 export const api = {
+  getApiHealth: () => request<{ ok: boolean; timestamp: string }>('/health'),
   getAuthMe: () => authRequest<AuthUser>('/auth/me'),
   logout: () => authRequest<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
@@ -223,10 +402,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  getDbHealth: () => request<{ ok: boolean; dbFile: string; checkedAt: string }>('/db/health'),
+
   // Teacher
-  listTeacherCourses: () => request<{ id: string; name: string; teacherEmail: string; createdAt: string }[]>('/teacher/courses'),
+  listTeacherCourses: () => request<PlannerCourse[]>('/teacher/courses'),
   createTeacherCourse: (name: string) =>
-    request<{ id: string; name: string; teacherEmail: string; createdAt: string }>('/teacher/courses', {
+    request<PlannerCourse>('/teacher/courses', {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
@@ -251,6 +432,15 @@ export const api = {
     }),
   listCourseAssignments: (courseId: string) =>
     request<CourseAssignment[]>(`/teacher/courses/${courseId}/assignments`),
+  createCourseAnnouncement: (courseId: string, body: { title: string; body: string }) =>
+    request<CourseAnnouncement>(`/teacher/courses/${courseId}/announcements`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listCourseAnnouncements: (courseId: string) =>
+    request<CourseAnnouncement[]>(`/teacher/courses/${courseId}/announcements`),
+  getTeacherCourseFeedbackSummary: (courseId: string) =>
+    request<CourseFeedbackSummary>(`/teacher/courses/${courseId}/feedback`),
   listGradingTasks: () =>
     request<GradingTask[]>('/teacher/grading-tasks'),
   createGradingTask: (body: { title: string; dueAtMs?: number | null; estMinutes: number }) =>
@@ -264,6 +454,22 @@ export const api = {
   // Student
   listStudentAssignments: () =>
     request<CourseAssignment[]>('/student/assignments'),
+  listStudentCourses: () =>
+    request<PlannerCourse[]>('/student/courses'),
+  joinCourseByCode: (courseCode: string) =>
+    request<PlannerCourse>('/student/courses/join-code', {
+      method: 'POST',
+      body: JSON.stringify({ courseCode }),
+    }),
+  getStudentCourseDetail: (courseId: string) =>
+    request<{ course: PlannerCourse; assignments: CourseAssignment[]; announcements: CourseAnnouncement[] }>(`/student/courses/${courseId}`),
+  getStudentCourseFeedback: (courseId: string) =>
+    request<CourseFeedbackSubmission | null>(`/student/courses/${courseId}/feedback`),
+  submitStudentCourseFeedback: (courseId: string, body: { rating: number; comment?: string | null }) =>
+    request<CourseFeedbackSubmission>(`/student/courses/${courseId}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   parseAssignmentText: (text: string) =>
     request<ParsedDraft>('/assignments/parse', {
@@ -325,6 +531,11 @@ export const api = {
     subject: string;
     urgency: string;
     linkedAssignmentId?: string | null;
+    claimMode?: 'any' | 'teacher_only';
+    meetingAbout?: string | null;
+    meetingLocation?: string | null;
+    meetingLink?: string | null;
+    proposedTimes?: string | null;
   }) =>
     request<HelpRequest>('/requests', {
       method: 'POST',
@@ -353,6 +564,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ body }),
     }), // authorLabel determined by backend from X-User-Email
+
+  listNotifications: (limit = 50) =>
+    request<NotificationRecord[]>(`/notifications?limit=${encodeURIComponent(String(limit))}`),
+  getUnreadNotificationCount: () =>
+    request<{ count: number }>('/notifications/unread-count'),
+  markNotificationRead: (id: string) =>
+    request<{ ok: boolean; updated: boolean }>(`/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () =>
+    request<{ ok: boolean; updated: number }>('/notifications/read-all', { method: 'POST' }),
 
   getRequestsSummary: () =>
     request<RequestsSummaryRow[]>('/insights/requests-summary'),

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { setDevIdentity } from './devIdentity';
 
 function rowFor(buttonText: string) {
   return `.qa-test-row:has(button:has-text("${buttonText}"))`;
@@ -8,6 +9,7 @@ test.describe('QA page (dev-only)', () => {
   test('seed demo data, run claim/comment/self-claim/insights flows, verify PASS', async ({
     page,
   }) => {
+    await setDevIdentity(page, 'student-a');
     await page.goto('/qa');
 
     // Seed demo data

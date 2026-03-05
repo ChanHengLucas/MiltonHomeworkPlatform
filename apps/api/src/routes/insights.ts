@@ -1,18 +1,8 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
 import { getRequestsSummary, getInsightsStats, listReports } from '@planner/db';
-import { isTeacherEligible } from '../utils/identity';
+import { requireTeacher } from '../middleware/identity';
 
 export const insightsRouter = Router();
-
-function requireTeacher(req: Request, res: Response, next: NextFunction): void {
-  const email = (req.headers['x-user-email'] as string)?.trim() || '';
-  const userEmail = email.toLowerCase();
-  if (!userEmail || !isTeacherEligible(userEmail)) {
-    res.status(403).json({ error: 'Teacher dashboard only. Access restricted.' });
-    return;
-  }
-  next();
-}
 
 insightsRouter.use(requireTeacher);
 

@@ -118,10 +118,10 @@ describe('makePlan', () => {
       now: '2024-01-01T00:00:00Z',
     });
 
-    expect(result.sessions).toHaveLength(4);
+    expect(result.sessions).toHaveLength(6);
     expect(result.sessions[result.sessions.length - 1]).toMatchObject({
-      startMin: 21 * 60 + 30,
-      endMin: 22 * 60,
+      startMin: 22 * 60 + 30,
+      endMin: 23 * 60,
     });
   });
 

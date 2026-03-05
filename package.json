@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev": "node scripts/run-dev.js",
     "build": "npm run build -w packages/core && npm run build -w packages/db && npm run build -w apps/api && npm run build:web",
     "build:web": "npm run build -w apps/web",
     "test": "npm test -w packages/core",
@@ -19,6 +19,7 @@
     "lint": "eslint . --ext .ts,.tsx,.js,.cjs,.mjs",
     "format": "prettier --write .",
     "db:migrate": "npm run build -w packages/core && npm run build -w packages/db && node packages/db/dist/migrate.js",
+    "db:reset": "node scripts/db-reset.js && npm run db:migrate",
     "dev:api": "npm --workspace apps/api run dev",
     "dev:web": "npm --workspace apps/web run dev"
   },

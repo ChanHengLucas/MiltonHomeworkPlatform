@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import { useAuth } from '../context/AuthContext';
 import { Button, Card, Callout } from '../components/ui';
+import { useAuth } from '../context/AuthContext';
+import { useIdentity } from '../hooks/useIdentity';
 
 interface PlannerForm {
   studyWindowStartMin: number;
@@ -53,7 +55,9 @@ function parseWeightsText(text: string): Record<string, number> {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
+  const { source, profile, logoutGoogle } = useIdentity();
   const [cleanupRunning, setCleanupRunning] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<string | null>(null);
   const [loadingPrefs, setLoadingPrefs] = useState(true);
@@ -70,13 +74,21 @@ export function SettingsPage() {
   });
 
   const profileLabel = useMemo(() => {
-    if (!user) return 'Not signed in';
-    return user.isTeacher ? 'Teacher/Staff account' : 'Student account';
-  }, [user]);
+    if (source === 'dev') return 'Dev mode identity (not Google)';
+    if (source === 'google') {
+      return profile?.isTeacher ? 'Teacher/Staff Google account' : 'Student Google account';
+    }
+    return 'Not signed in';
+  }, [profile?.isTeacher, source]);
 
   useEffect(() => {
+    if (!user) {
+      setLoadingPrefs(false);
+      setPrefsError(null);
+      return;
+    }
     loadPreferences();
-  }, []);
+  }, [user]);
 
   async function loadPreferences() {
     try {
@@ -99,6 +111,10 @@ export function SettingsPage() {
   }
 
   async function handleSavePreferences() {
+    if (!user) {
+      setPrefsError('Sign in to update planner preferences.');
+      return;
+    }
     if (form.studyWindowEndMin <= form.studyWindowStartMin) {
       setPrefsError('Preferred study window end must be after start.');
       return;
@@ -134,22 +150,56 @@ export function SettingsPage() {
         <div className="form-grid">
           <div className="form-group">
             <label>Name</label>
-            <input className="ui-input" value={user?.name ?? ''} readOnly placeholder="Sign in with Google" />
+            <input
+              className="ui-input"
+              value={profile?.name ?? ''}
+              readOnly
+              placeholder={source === 'dev' ? 'Dev identity name' : 'Sign in with Google'}
+            />
           </div>
           <div className="form-group">
             <label>Email</label>
-            <input className="ui-input" value={user?.email ?? ''} readOnly placeholder="Sign in with Google" />
+            <input
+              className="ui-input"
+              value={profile?.email ?? ''}
+              readOnly
+              placeholder={source === 'dev' ? 'Dev identity email' : 'Sign in with Google'}
+            />
           </div>
         </div>
         <p className="form-hint" style={{ margin: 0 }}>
           {profileLabel}
         </p>
+        {source === 'dev' && (
+          <p className="form-hint" style={{ marginBottom: 0 }}>
+            Google login is disabled while dev identity mode is active. Open <code>/dev</code> to disable dev identity.
+          </p>
+        )}
+        {source === 'google' && (
+          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                await logoutGoogle();
+                navigate('/login', { replace: true });
+              }}
+            >
+              Sign out
+            </Button>
+          </div>
+        )}
       </Card>
 
       <Card>
         <h2 className="section-title">Planner preferences</h2>
+        {!user && (
+          <Callout variant="error">Sign in to load planner preferences.</Callout>
+        )}
         {loadingPrefs ? (
           <p>Loading…</p>
+        ) : !user ? (
+          <p className="form-hint">Planner preferences are available after authentication.</p>
         ) : (
           <>
             <div className="form-grid">
@@ -238,7 +288,7 @@ export function SettingsPage() {
                   }))
                 }
               />
-              <span>Avoid late-night sessions (after 10:00 PM)</span>
+              <span>Avoid late-night sessions (after 11:00 PM)</span>
             </label>
             <div className="form-actions">
               <Button onClick={handleSavePreferences} disabled={savingPrefs}>

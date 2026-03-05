@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { setDevIdentity } from './devIdentity';
 
 test.describe('Availability flow', () => {
   test('add block Mon 19:00–22:00, verify in list under Mon', async ({ page }) => {
+    await setDevIdentity(page, 'student-a');
     await page.goto('/availability');
 
     await page.selectOption('select >> nth=0', '0'); // Mon = index 0

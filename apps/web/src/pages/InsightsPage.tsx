@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, type RequestsSummaryRow } from '../api';
 import { useAppState } from '../context/AppContext';
 import { Button, Card, Callout } from '../components/ui';
+import { useAuthGate } from '../hooks/useAuthGate';
 
 function urgencyLabel(u: string): string {
   return u === 'med' ? 'Medium' : u.charAt(0).toUpperCase() + u.slice(1);
@@ -11,6 +12,7 @@ function urgencyLabel(u: string): string {
 
 export function InsightsPage() {
   const { teacherEligible } = useAppState();
+  const { isSignedIn } = useAuthGate();
   const [summary, setSummary] = useState<RequestsSummaryRow[]>([]);
   const [stats, setStats] = useState<{
     totalOpen: number;
@@ -29,10 +31,20 @@ export function InsightsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isSignedIn) {
+      setLoading(false);
+      setSummary([]);
+      setStats(null);
+      setReports(null);
+      setBlocklist([]);
+      setError(null);
+      return;
+    }
     if (teacherEligible) load();
-  }, [teacherEligible]);
+  }, [teacherEligible, isSignedIn]);
 
   async function load() {
+    if (!isSignedIn) return;
     try {
       setLoading(true);
       setError(null);
@@ -59,6 +71,7 @@ export function InsightsPage() {
   }
 
   async function handleAddBlock() {
+    if (!isSignedIn) return;
     if (!blockEmail.trim() || !blockUntil.trim()) return;
     try {
       setError(null);
