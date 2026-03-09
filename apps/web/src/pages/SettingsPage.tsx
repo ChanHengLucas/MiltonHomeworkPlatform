@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { Button, Card, Callout } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -81,6 +81,12 @@ export function SettingsPage() {
     return 'Not signed in';
   }, [profile?.isTeacher, source]);
 
+  const profileBadgeClass = useMemo(() => {
+    if (source === 'dev') return 'status-chip status-claimed';
+    if (source === 'google') return 'status-chip status-open';
+    return 'status-chip status-closed';
+  }, [source]);
+
   useEffect(() => {
     if (!user) {
       setLoadingPrefs(false);
@@ -146,33 +152,26 @@ export function SettingsPage() {
       <p className="page-subtitle">Profile details and planner preferences are saved to your account.</p>
 
       <Card>
-        <h2 className="section-title">Profile</h2>
-        <div className="form-grid">
-          <div className="form-group">
-            <label>Name</label>
-            <input
-              className="ui-input"
-              value={profile?.name ?? ''}
-              readOnly
-              placeholder={source === 'dev' ? 'Dev identity name' : 'Sign in with Google'}
-            />
+        <div className="split-header">
+          <h2 className="section-title" style={{ marginBottom: 0 }}>Profile</h2>
+          <span className={profileBadgeClass}>{source === 'dev' ? 'Dev identity' : source === 'google' ? 'Google' : 'Signed out'}</span>
+        </div>
+        <div className="profile-grid" style={{ marginTop: '0.75rem' }}>
+          <div className="profile-item">
+            <p className="profile-label">Name</p>
+            <p className="profile-value">{profile?.name || 'Not available'}</p>
           </div>
-          <div className="form-group">
-            <label>Email</label>
-            <input
-              className="ui-input"
-              value={profile?.email ?? ''}
-              readOnly
-              placeholder={source === 'dev' ? 'Dev identity email' : 'Sign in with Google'}
-            />
+          <div className="profile-item">
+            <p className="profile-label">Email</p>
+            <p className="profile-value">{profile?.email || 'Not available'}</p>
           </div>
         </div>
-        <p className="form-hint" style={{ margin: 0 }}>
+        <p className="form-hint" style={{ marginTop: '0.65rem', marginBottom: 0 }}>
           {profileLabel}
         </p>
         {source === 'dev' && (
-          <p className="form-hint" style={{ marginBottom: 0 }}>
-            Google login is disabled while dev identity mode is active. Open <code>/dev</code> to disable dev identity.
+          <p className="form-hint" style={{ marginBottom: 0, marginTop: '0.35rem' }}>
+            Google login is disabled while dev identity mode is active. Open <Link className="link" to="/dev">/dev</Link> to switch or disable dev identity.
           </p>
         )}
         {source === 'google' && (

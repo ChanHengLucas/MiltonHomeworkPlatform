@@ -20,6 +20,7 @@ const createBodySchema = zod_1.z.object({
     estMinutes: zod_1.z.number().int().min(5, 'Estimated time must be at least 5 minutes'),
     priority: prioritySchema,
     type: assignmentTypeEnum,
+    optional: zod_1.z.boolean().optional().default(false),
 });
 const updateCompletionSchema = zod_1.z.object({
     completed: zod_1.z.boolean(),
@@ -63,6 +64,7 @@ exports.assignmentsRouter.post('/', (req, res, next) => {
         priority: data.priority,
         type: data.type,
         completed: false,
+        optional: data.optional,
     };
     (0, db_1.createAssignment)(assignment);
     res.status(201).json(assignment);

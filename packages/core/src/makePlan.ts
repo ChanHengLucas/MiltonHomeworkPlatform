@@ -120,6 +120,12 @@ export function makePlan(req: PlanRequest): PlanResult {
   }
 
   const scoredAssignments = [...pendingAssignments].sort((a, b) => {
+    const aOptional = Boolean(a.optional);
+    const bOptional = Boolean(b.optional);
+    if (aOptional !== bOptional) {
+      return aOptional ? 1 : -1;
+    }
+
     const scoreA = computeUrgencyScore(a, req.now) + getCourseWeight(a.course, req.preferences?.coursePriorityWeights);
     const scoreB = computeUrgencyScore(b, req.now) + getCourseWeight(b.course, req.preferences?.coursePriorityWeights);
     // higher score first, break ties by due date then id for determinism
@@ -151,9 +157,15 @@ export function makePlan(req: PlanRequest): PlanResult {
     }
 
     if (remaining > 0) {
-      warnings.push(
-        `Insufficient time for "${assignment.title}". Short by approximately ${remaining} minutes.`
-      );
+      if (assignment.optional) {
+        warnings.push(
+          `Optional task "${assignment.title}" was not fully scheduled (${remaining} minutes unscheduled).`
+        );
+      } else {
+        warnings.push(
+          `Insufficient time for "${assignment.title}". Short by approximately ${remaining} minutes.`
+        );
+      }
     }
   }
 

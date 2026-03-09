@@ -156,4 +156,23 @@ describe('makePlan', () => {
 
     expect(result.sessions[0].assignmentId).toBe('as2');
   });
+
+  it('schedules required assignments before optional tasks', () => {
+    const assignments = [
+      mkAssignment('opt', { title: 'Optional reading', estMinutes: 60, optional: true }),
+      mkAssignment('req', { title: 'Required worksheet', estMinutes: 30, optional: false }),
+    ];
+    const availability = [mkAvailability('a1', 0, 60)];
+
+    const result = makePlan({
+      assignments,
+      availability,
+      sessionMin: 30,
+      now: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result.sessions).toHaveLength(2);
+    expect(result.sessions[0].assignmentId).toBe('req');
+    expect(result.warnings.some((w) => w.includes('Optional task'))).toBeTruthy();
+  });
 });

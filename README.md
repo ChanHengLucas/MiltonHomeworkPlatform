@@ -12,7 +12,7 @@ Monorepo for a school planner + support hub:
   - `dev` mode (no Google) when OAuth env vars are missing in local development
   - `google` mode when OAuth env vars are configured (always in production)
 - Dev/test identity simulation with Dev Identity Switcher (`/dev`)
-- Personal assignments + teacher-published assignments + teacher grading tasks
+- Personal assignments (including optional-task flag) + teacher-published assignments + teacher grading tasks
 - Availability + deterministic plan generation (including Google Calendar busy blocks)
 - Support Hub claim/unclaim/close/report flows with visibility rules
 - Teacher-only Insights and teacher-only dashboard routes
@@ -92,8 +92,9 @@ Default URLs:
 - Dev mode (`mode=dev`):
   - API accepts `X-User-Email`/`X-User-Name` headers automatically
   - `/api/auth/me` returns `{ mode: "dev" }` and does not require Google session
-  - UI shows `DEV MODE (no Google)` and hides Google sign-in controls
-  - Use `/dev` to pick/clear local dev identity
+  - Login UI shows `DEV MODE (no Google)`, hides Google sign-in controls, and links directly to `/dev`
+  - `/dev` is available in development even when signed out so local identity can be selected first
+  - Header/Settings show identity source consistently as Dev vs Google
 - Google mode (`mode=google`):
   - Uses Google OAuth + `express-session`
   - `/api/auth/me` returns 401 when signed out and 200 when session is present
@@ -111,6 +112,7 @@ Settings page stores deterministic preferences server-side:
 - Break between sessions
 - Avoid late-night sessions
 - Optional per-course priority weights
+- Personal assignments can be marked optional to de-prioritize them in planning warnings/order
 
 Planner uses these rules on every `/api/plan` call.
 

@@ -30,6 +30,7 @@ export function AssignmentsPage() {
     estMinutes: '' as string | number,
     priority: 3,
     type: 'homework',
+    optional: false,
   });
 
   const courses = [...new Set(assignments.map((a) => a.course).filter(Boolean))].sort();
@@ -113,9 +114,18 @@ export function AssignmentsPage() {
         estMinutes: est,
         priority: confirmForm.priority as 1 | 2 | 3 | 4 | 5,
         type: confirmForm.type,
+        optional: confirmForm.optional,
       });
       console.log('[Planner][API] Created assignment');
-      setConfirmForm({ course: '', title: '', dueAt: '', estMinutes: 30 as const, priority: 3, type: 'homework' });
+      setConfirmForm({
+        course: '',
+        title: '',
+        dueAt: '',
+        estMinutes: 30 as const,
+        priority: 3,
+        type: 'homework',
+        optional: false,
+      });
       setParseText('');
       await load();
       if (genPlan) navigate('/plan');
@@ -255,6 +265,16 @@ export function AssignmentsPage() {
               ))}
             </select>
           </div>
+          <div className="form-group">
+            <label className="toggle-row" style={{ marginTop: '1.65rem' }}>
+              <input
+                type="checkbox"
+                checked={confirmForm.optional}
+                onChange={(e) => setConfirmForm((f) => ({ ...f, optional: e.target.checked }))}
+              />
+              <span>Optional assignment</span>
+            </label>
+          </div>
         </div>
         <Button onClick={() => handleSave(false)}>Add assignment</Button>
       </Card>
@@ -320,7 +340,10 @@ export function AssignmentsPage() {
                 className={`assignment-card ${a.completed ? 'completed' : ''}`}
               >
                 <div className="assignment-card-content">
-                  <div className="assignment-card-title">{a.title}</div>
+                  <div className="split-header" style={{ marginBottom: '0.15rem' }}>
+                    <div className="assignment-card-title">{a.title}</div>
+                    {a.optional && <span className="status-chip status-claimed">Optional</span>}
+                  </div>
                   <div className="assignment-card-meta">
                     {a.course} · {a.estMinutes} min · {a.type}
                     {formatDueDate(a.dueAt) === 'No due date'

@@ -473,6 +473,13 @@ const MIGRATIONS = [
       );
       CREATE INDEX IF NOT EXISTS idx_course_feedback_course ON course_feedback(courseId, updatedAt DESC);
     `
+    },
+    {
+        id: '016_assignments_optional_flag',
+        up: `
+      ALTER TABLE assignments ADD COLUMN optional INTEGER NOT NULL DEFAULT 0;
+      UPDATE assignments SET optional = 0 WHERE optional IS NULL;
+    `
     }
 ];
 function applyMigrations() {
@@ -544,19 +551,21 @@ function listAssignments() {
         estMinutes: row.estMinutes,
         priority: row.priority,
         type: row.type,
-        completed: !!row.completed
+        completed: !!row.completed,
+        optional: !!row.optional,
     }));
 }
 function createAssignment(assignment) {
     const db = getDb();
     const stmt = db.prepare(`INSERT INTO assignments
-      (id, course, title, dueAt, estMinutes, priority, type, completed)
-     VALUES (@id, @course, @title, @dueAt, @estMinutes, @priority, @type, @completed)`);
+      (id, course, title, dueAt, estMinutes, priority, type, completed, optional)
+     VALUES (@id, @course, @title, @dueAt, @estMinutes, @priority, @type, @completed, @optional)`);
     const dueAt = assignment.dueAt != null && assignment.dueAt > 0 ? assignment.dueAt : null;
     runWrite('assignments.insert', () => stmt.run({
         ...assignment,
         dueAt,
-        completed: assignment.completed ? 1 : 0
+        completed: assignment.completed ? 1 : 0,
+        optional: assignment.optional ? 1 : 0,
     }));
     return assignment;
 }

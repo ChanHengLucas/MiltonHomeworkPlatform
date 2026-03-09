@@ -26,6 +26,7 @@ const createBodySchema = z.object({
   estMinutes: z.number().int().min(5, 'Estimated time must be at least 5 minutes'),
   priority: prioritySchema,
   type: assignmentTypeEnum,
+  optional: z.boolean().optional().default(false),
 });
 
 const updateCompletionSchema = z.object({
@@ -79,6 +80,7 @@ assignmentsRouter.post('/', (req, res, next) => {
     priority: data.priority as 1 | 2 | 3 | 4 | 5,
     type: data.type as AssignmentType,
     completed: false,
+    optional: data.optional,
   };
 
   createAssignment(assignment);

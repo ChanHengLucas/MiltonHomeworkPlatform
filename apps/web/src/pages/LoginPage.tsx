@@ -1,9 +1,15 @@
 import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
-import { Card } from '../components/ui';
+import { Button, Card, Callout } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useIdentity } from '../hooks/useIdentity';
+
+function errorMessage(code: string): string {
+  if (code === 'no_code') return 'Authorization was cancelled or failed.';
+  if (code === 'callback_failed') return 'Sign-in failed. Please try again.';
+  return `Error: ${code}`;
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -13,7 +19,9 @@ export function LoginPage() {
   const error = searchParams.get('error');
   const { user, loading } = useAuth();
   const { source, profile } = useIdentity();
-  const devIdentityActive = import.meta.env.DEV && source === 'dev' && !!profile?.email;
+
+  const isDevMode = import.meta.env.DEV && source === 'dev';
+  const devIdentityActive = isDevMode && !!profile?.email?.trim();
 
   useEffect(() => {
     if (devIdentityActive) {
@@ -31,77 +39,97 @@ export function LoginPage() {
     window.location.href = '/api/auth/google/start';
   }
 
-  if (mock) {
+  if (loading && !devIdentityActive && !mock) {
     return (
-      <div className="page" style={{ maxWidth: 400, margin: '2rem auto' }}>
-        <Card>
-          <h1 className="page-title">Mock Auth Mode</h1>
-          <p className="page-subtitle">
-            In E2E/test mode, use the Dev Identity page (<code>/dev</code>) to set your identity.
-            No Google login required.
-          </p>
-          <p style={{ marginTop: '1rem' }}>
-            <a href="/" className="link">Go to app →</a>
-          </p>
+      <div className="auth-shell">
+        <Card className="auth-card">
+          <div className="auth-header">
+            <span className="status-chip status-open auth-mode-badge">Checking Auth</span>
+            <h1 className="page-title">Sign in</h1>
+            <p className="page-subtitle">Checking authentication status…</p>
+          </div>
         </Card>
       </div>
     );
   }
 
-  if (loading && !devIdentityActive) {
+  if (mock) {
     return (
-      <div className="page" style={{ maxWidth: 400, margin: '2rem auto' }}>
-        <Card>
-          <h1 className="page-title">Sign in</h1>
-          <p className="page-subtitle">Checking authentication…</p>
+      <div className="auth-shell">
+        <Card className="auth-card">
+          <div className="auth-header">
+            <span className="status-chip status-claimed auth-mode-badge">Mock Auth</span>
+            <h1 className="page-title">Sign in</h1>
+            <p className="page-subtitle">Test mode is active for local and E2E flows.</p>
+          </div>
+          <p className="auth-subcopy">
+            Use the Dev Identity page (<code>/dev</code>) to set identity. Google login is not required.
+          </p>
+          <div className="auth-actions">
+            <Link to="/dev" className="ui-btn btn-primary btn-lg">
+              Open Dev Identity
+            </Link>
+            <Link to="/" className="ui-btn btn-secondary">
+              Continue to app
+            </Link>
+          </div>
         </Card>
       </div>
     );
   }
 
   return (
-    <div className="page" style={{ maxWidth: 400, margin: '2rem auto' }}>
-      <Card>
-        <h1 className="page-title">Sign in</h1>
-        <p className="page-subtitle">
-          {import.meta.env.DEV && source === 'dev'
-            ? 'DEV MODE (no Google). Choose a dev identity to continue.'
-            : 'Use your Milton account to continue.'}
-        </p>
+    <div className="auth-shell">
+      <Card className="auth-card">
+        <div className="auth-header">
+          <span className={`status-chip ${isDevMode ? 'status-claimed' : 'status-open'} auth-mode-badge`}>
+            {isDevMode ? 'DEV MODE' : 'Google Auth'}
+          </span>
+          <h1 className="page-title">Sign in</h1>
+          <p className="page-subtitle">
+            {isDevMode
+              ? 'DEV MODE (no Google). Choose a dev identity to continue.'
+              : 'Use your Milton Google account to continue.'}
+          </p>
+          {isDevMode && (
+            <p className="auth-subcopy">
+              {profile?.email
+                ? `Dev identity active (${profile.email}).`
+                : 'Dev auth mode is active. Set an identity in /dev.'}{' '}
+              Google login is disabled.
+            </p>
+          )}
+          {dev && (
+            <p className="auth-subcopy">
+              Returned from OAuth callback while API is running in dev auth mode.
+            </p>
+          )}
+        </div>
 
         {error && (
-          <p className="callout-error" style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: 8 }}>
-            {error === 'no_code' && 'Authorization was cancelled or failed.'}
-            {error === 'callback_failed' && 'Sign-in failed. Please try again.'}
-            {!['no_code', 'callback_failed'].includes(error) && `Error: ${error}`}
-          </p>
+          <Callout variant="error">
+            {errorMessage(error)}
+          </Callout>
         )}
 
-        {import.meta.env.DEV && source === 'dev' && (
-          <p className="form-hint" style={{ marginBottom: '1rem' }}>
-            {profile?.email
-              ? `Dev identity active (${profile.email}). Google login is disabled.`
-              : 'Dev auth mode is active. Set an identity in /dev. Google login is disabled.'}
-          </p>
-        )}
-
-        {dev && (
-          <p className="form-hint" style={{ marginBottom: '1rem' }}>
-            Returned from OAuth callback while API is in dev auth mode.
-          </p>
-        )}
-
-        {!(import.meta.env.DEV && source === 'dev') && (
-          <button
-            type="button"
-            className="ui-btn btn-primary btn-primary-large"
-            onClick={handleGoogleLogin}
-            style={{ width: '100%' }}
-          >
+        {isDevMode ? (
+          <div className="auth-actions">
+            <Link to="/dev" className="ui-btn btn-primary btn-lg">
+              {profile?.email ? 'Switch Dev Identity' : 'Open Dev Identity'}
+            </Link>
+            {profile?.email && (
+              <Link to="/" className="ui-btn btn-secondary">
+                Continue to app
+              </Link>
+            )}
+          </div>
+        ) : (
+          <Button type="button" onClick={handleGoogleLogin} className="btn-primary-large btn-full">
             Sign in with Google
-          </button>
+          </Button>
         )}
       </Card>
     </div>
   );
 }
+

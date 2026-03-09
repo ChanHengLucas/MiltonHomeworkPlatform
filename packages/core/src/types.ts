@@ -9,6 +9,7 @@ export interface Assignment {
   priority: 1 | 2 | 3 | 4 | 5;
   type: AssignmentType;
   completed: boolean;
+  optional?: boolean;
 }
 
 export interface AvailabilityBlock {

@@ -219,6 +219,7 @@ export interface Assignment {
   priority: number;
   type: string;
   completed: boolean;
+  optional?: boolean;
 }
 
 export interface ParsedDraft {

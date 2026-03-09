@@ -34,6 +34,16 @@ function App() {
         <AppProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {DevToolsPage && (
+              <Route
+                path="/dev"
+                element={(
+                  <Suspense fallback={<p>Loading…</p>}>
+                    <DevToolsPage />
+                  </Suspense>
+                )}
+              />
+            )}
             <Route path="/" element={<Navigate to="/assignments" replace />} />
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route path="assignments" element={<AssignmentsPage />} />
@@ -46,16 +56,6 @@ function App() {
               <Route path="teacher" element={<TeacherDashboardPage />} />
               <Route path="insights" element={<InsightsPage />} />
               <Route path="settings" element={<SettingsPage />} />
-              {DevToolsPage && (
-                <Route
-                  path="dev"
-                  element={(
-                    <Suspense fallback={<p>Loading…</p>}>
-                      <DevToolsPage />
-                    </Suspense>
-                  )}
-                />
-              )}
               {DevQAPage && (
                 <Route
                   path="qa"
