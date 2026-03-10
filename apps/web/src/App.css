@@ -1068,6 +1068,20 @@ a {
   padding: 1.25rem;
 }
 
+/* Spinner */
+.ui-spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* QA harness */
 .qa-pass {
   color: var(--color-primary);

@@ -649,7 +649,15 @@ export function TeacherDashboardPage() {
                                               <ul style={{ margin: 0, paddingLeft: '1rem' }}>
                                                 {submission.files.map((file) => (
                                                   <li key={file.id} className="form-hint">
-                                                    {file.originalName} ({Math.round(file.sizeBytes / 1024)} KB)
+                                                    <a
+                                                      className="link"
+                                                      href={`/api/uploads/submissions/${submission.id}/files/${file.id}`}
+                                                      target="_blank"
+                                                      rel="noreferrer"
+                                                    >
+                                                      {file.originalName}
+                                                    </a>{' '}
+                                                    ({Math.round(file.sizeBytes / 1024)} KB)
                                                   </li>
                                                 ))}
                                               </ul>

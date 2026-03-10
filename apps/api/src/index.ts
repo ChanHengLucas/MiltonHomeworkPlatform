@@ -20,6 +20,7 @@ import { adminRouter } from './routes/admin';
 import { settingsRouter } from './routes/settings';
 import { dbRouter } from './routes/db';
 import { notificationsRouter } from './routes/notifications';
+import { uploadsRouter } from './routes/uploads';
 import { errorHandler } from './middleware/errorHandler';
 import { identityMiddleware } from './middleware/identity';
 import { runDueReminderScan } from './services/notifications';
@@ -117,6 +118,7 @@ app.use('/api/insights', insightsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/uploads', uploadsRouter);
 
 const mountedRoutePrefixes = [
   '/api/auth',

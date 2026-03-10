@@ -158,58 +158,9 @@ export interface AuthUser {
   authenticated?: boolean;
 }
 
-async function authRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+function authRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const url = `${API_BASE}${normalizedPath}`;
-  const identityHeaders = getIdentityHeaders();
-  if (apiAuthStatus === 'signed_out' && !hasDevIdentity(identityHeaders) && !isPublicPath(normalizedPath)) {
-    throw makeSignedOutError();
-  }
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...identityHeaders,
-        ...options.headers,
-      },
-    });
-  } catch (cause) {
-    const err = new Error('API offline or proxy misconfigured') as Error & { status?: number; cause?: unknown };
-    err.status = 0;
-    err.cause = cause;
-    throw err;
-  }
-  const text = await res.text();
-  let data: unknown;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
-  if (!res.ok) {
-    const responseMode =
-      typeof data === 'object'
-      && data !== null
-      && 'mode' in data
-      && ((data as { mode?: unknown }).mode === 'dev' || (data as { mode?: unknown }).mode === 'google')
-        ? (data as { mode: 'dev' | 'google' }).mode
-        : undefined;
-    const msg =
-      (typeof data === 'object' && data !== null && 'error' in data && typeof (data as { error: unknown }).error === 'string')
-        ? (data as { error: string }).error
-        : `Request failed: ${res.status} ${res.statusText}`;
-    if (res.status === 401 && normalizedPath !== '/auth/me' && !hasDevIdentity(identityHeaders)) {
-      notifySignedOut();
-    }
-    const err = new Error(msg) as Error & { status?: number; mode?: 'dev' | 'google' };
-    err.status = res.status;
-    err.mode = responseMode;
-    throw err;
-  }
-  return data as T;
+  return request<T>(normalizedPath, options);
 }
 
 export interface Assignment {

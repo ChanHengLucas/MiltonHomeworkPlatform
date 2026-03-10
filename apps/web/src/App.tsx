@@ -1,8 +1,8 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { AuthProvider } from './context/AuthContext';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useAppState } from './context/AppContext';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AssignmentsPage } from './pages/AssignmentsPage';
@@ -16,8 +16,7 @@ import { InsightsPage } from './pages/InsightsPage';
 import { LoginPage } from './pages/LoginPage';
 import { TeacherDashboardPage } from './pages/TeacherDashboardPage';
 import { NotificationsPage } from './pages/NotificationsPage';
-import { useAppState } from './context/AppContext';
-
+import { Card } from './components/ui';
 const DevQAPage = import.meta.env.DEV
   ? lazy(() => import('./pages/QAPage').then((m) => ({ default: m.QAPage })))
   : null;
@@ -27,11 +26,22 @@ const DevToolsPage = import.meta.env.DEV
   : null;
 
 function AssignmentsRoute() {
-  const { teacherEligible } = useAppState();
-  if (teacherEligible) {
-    return <Navigate to="/teacher/homework" replace />;
-  }
   return <AssignmentsPage />;
+}
+
+function TeacherRoute({ children }: { children: ReactNode }) {
+  const { teacherEligible } = useAppState();
+  if (!teacherEligible) {
+    return (
+      <div className="page">
+        <Card>
+          <h2 className="section-title">Access denied</h2>
+          <p className="page-subtitle">This page is only available to teachers.</p>
+        </Card>
+      </div>
+    );
+  }
+  return <>{children}</>;
 }
 
 function App() {
@@ -62,7 +72,7 @@ function App() {
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="teacher/homework" element={<TeacherDashboardPage />} />
               <Route path="teacher" element={<TeacherDashboardPage />} />
-              <Route path="insights" element={<InsightsPage />} />
+              <Route path="insights" element={<TeacherRoute><InsightsPage /></TeacherRoute>} />
               <Route path="settings" element={<SettingsPage />} />
               {DevQAPage && (
                 <Route

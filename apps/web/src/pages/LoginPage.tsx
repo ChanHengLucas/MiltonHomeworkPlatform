@@ -47,6 +47,9 @@ export function LoginPage() {
             <span className="status-chip status-open auth-mode-badge">Checking Auth</span>
             <h1 className="page-title">Sign in</h1>
             <p className="page-subtitle">Checking authentication status…</p>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
+              <div className="ui-spinner" />
+            </div>
           </div>
         </Card>
       </div>
@@ -125,9 +128,6 @@ export function LoginPage() {
           </div>
         ) : (
           <div className="auth-actions">
-            <Button type="button" variant="secondary" onClick={handleGoogleLogin}>
-              Sign in
-            </Button>
             <Button type="button" onClick={handleGoogleLogin} className="btn-primary-large">
               Sign in with Google
             </Button>

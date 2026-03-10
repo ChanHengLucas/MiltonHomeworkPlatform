@@ -26,6 +26,7 @@ export function SupportPage() {
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     title: '',
     description: '',
@@ -90,14 +91,19 @@ export function SupportPage() {
     }
   }
 
+  function updateCreateForm(updates: Partial<typeof createForm>) {
+    setCreateForm((f) => ({ ...f, ...updates }));
+    setCreateError(null);
+  }
+
   async function handleCreate() {
     if (!isSignedIn) return;
     if (!createForm.title.trim() || !createForm.description.trim() || !createForm.subject.trim()) {
-      setError('Title, description, and subject are required');
+      setCreateError('Title, description, and subject are required');
       return;
     }
     try {
-      setError(null);
+      setCreateError(null);
       const created = await api.createRequest({
         ...createForm,
         linkedAssignmentId: prefilledLinkedId || undefined,
@@ -152,7 +158,7 @@ export function SupportPage() {
       navigate('/support');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create';
-      setError(msg);
+      setCreateError(msg);
       console.error('[Planner] [API]', msg);
     }
   }
@@ -170,7 +176,7 @@ export function SupportPage() {
             <input
               className="ui-input ui-input-large"
               value={createForm.title}
-              onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
+              onChange={(e) => updateCreateForm({ title: e.target.value })}
               placeholder="Brief summary of what you need"
             />
           </div>
@@ -179,7 +185,7 @@ export function SupportPage() {
             <textarea
               className="ui-textarea ui-textarea-large"
               value={createForm.description}
-              onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+              onChange={(e) => updateCreateForm({ description: e.target.value })}
               placeholder="Describe your question in detail"
               style={{ minHeight: 140 }}
             />
@@ -192,7 +198,7 @@ export function SupportPage() {
             <input
               className="ui-input"
               value={createForm.subject}
-              onChange={(e) => setCreateForm((f) => ({ ...f, subject: e.target.value }))}
+              onChange={(e) => updateCreateForm({ subject: e.target.value })}
               placeholder="e.g. Math, Biology"
             />
           </div>
@@ -201,7 +207,7 @@ export function SupportPage() {
             <select
               className="ui-select"
               value={createForm.urgency}
-              onChange={(e) => setCreateForm((f) => ({ ...f, urgency: e.target.value as 'low' | 'med' | 'high' }))}
+              onChange={(e) => updateCreateForm({ urgency: e.target.value as 'low' | 'med' | 'high' })}
             >
               <option value="low">Low</option>
               <option value="med">Medium</option>
@@ -213,7 +219,7 @@ export function SupportPage() {
             <select
               className="ui-select"
               value={createForm.claimMode}
-              onChange={(e) => setCreateForm((f) => ({ ...f, claimMode: e.target.value as 'any' | 'teacher_only' }))}
+              onChange={(e) => updateCreateForm({ claimMode: e.target.value as 'any' | 'teacher_only' })}
             >
               <option value="any">Any student helper</option>
               <option value="teacher_only">Teachers/tutors only</option>
@@ -224,7 +230,7 @@ export function SupportPage() {
             <input
               className="ui-input"
               value={createForm.meetingAbout}
-              onChange={(e) => setCreateForm((f) => ({ ...f, meetingAbout: e.target.value }))}
+              onChange={(e) => updateCreateForm({ meetingAbout: e.target.value })}
               placeholder="e.g. Algebra test review"
             />
           </div>
@@ -233,7 +239,7 @@ export function SupportPage() {
             <input
               className="ui-input"
               value={createForm.meetingLocation}
-              onChange={(e) => setCreateForm((f) => ({ ...f, meetingLocation: e.target.value }))}
+              onChange={(e) => updateCreateForm({ meetingLocation: e.target.value })}
               placeholder="Library table 4 / Room 201"
             />
           </div>
@@ -242,7 +248,7 @@ export function SupportPage() {
             <input
               className="ui-input"
               value={createForm.meetingLink}
-              onChange={(e) => setCreateForm((f) => ({ ...f, meetingLink: e.target.value }))}
+              onChange={(e) => updateCreateForm({ meetingLink: e.target.value })}
               placeholder="https://zoom.us/j/..."
             />
           </div>
@@ -251,7 +257,7 @@ export function SupportPage() {
             <textarea
               className="ui-textarea"
               value={createForm.proposedTimes}
-              onChange={(e) => setCreateForm((f) => ({ ...f, proposedTimes: e.target.value }))}
+              onChange={(e) => updateCreateForm({ proposedTimes: e.target.value })}
               placeholder="Mon 4:00-4:30 PM, Tue lunch, Wed after school"
               style={{ minHeight: 80 }}
             />
@@ -261,7 +267,7 @@ export function SupportPage() {
             <input
               className="ui-input"
               value={createForm.resourceLink}
-              onChange={(e) => setCreateForm((f) => ({ ...f, resourceLink: e.target.value }))}
+              onChange={(e) => updateCreateForm({ resourceLink: e.target.value })}
               placeholder="https://docs.google.com/... or class page link"
             />
           </div>
@@ -283,12 +289,15 @@ export function SupportPage() {
             <textarea
               className="ui-textarea"
               value={createForm.resourceNote}
-              onChange={(e) => setCreateForm((f) => ({ ...f, resourceNote: e.target.value }))}
+              onChange={(e) => updateCreateForm({ resourceNote: e.target.value })}
               placeholder="What should helpers know about the file or link?"
               style={{ minHeight: 60 }}
             />
           </div>
         </div>
+        {createError && (
+          <Callout variant="error">{createError}</Callout>
+        )}
         <Button onClick={handleCreate} className="btn-primary-large">
           Create Request
         </Button>

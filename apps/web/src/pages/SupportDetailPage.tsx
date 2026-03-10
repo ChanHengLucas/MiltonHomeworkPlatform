@@ -435,9 +435,14 @@ export function SupportDetailPage() {
                     </a>
                   )}
                   {resource.kind === 'file' && resource.storedPath && (
-                    <span className="form-hint">
-                      {resource.originalName || 'File'} ({Math.round((resource.sizeBytes || 0) / 1024)} KB)
-                    </span>
+                    <a
+                      className="link"
+                      href={`/api/uploads/support-resources/${resource.requestId}/${resource.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {resource.originalName || 'Download'} ({Math.round((resource.sizeBytes || 0) / 1024)} KB)
+                    </a>
                   )}
                 </div>
               </div>
