@@ -35,7 +35,7 @@ export function QAPage() {
     setResults({});
 
     try {
-      setIdentity('lucas12@milton.edu', 'Lucas Chan');
+      setIdentity('lucas_chan26@milton.edu', 'Lucas Chan');
 
       const dueAt = getNextWeekEpoch();
       const a = await api.createAssignment({
@@ -90,7 +90,7 @@ export function QAPage() {
       const openReq = requests.find(
         (r) =>
           r.status === 'open'
-          && r.createdByEmail === 'lucas12@milton.edu'
+          && r.createdByEmail === 'lucas_chan26@milton.edu'
           && !r.title?.includes('Self-claim')
       );
       if (!openReq) {
@@ -98,9 +98,9 @@ export function QAPage() {
         return;
       }
 
-      setIdentity('test34@milton.edu', 'Test Student');
+      setIdentity('jane_doe27@milton.edu', 'Jane Doe');
 
-      const claimed = await api.claimRequest(openReq.id, 'Test Student');
+      const claimed = await api.claimRequest(openReq.id, 'Jane Doe');
       setResult('claimOther', claimed?.status === 'claimed', claimed?.claimedBy ?? '');
     } catch (e) {
       setResult('claimOther', false, e instanceof Error ? e.message : 'Error');
@@ -114,11 +114,11 @@ export function QAPage() {
     setResults((r) => ({ ...r, selfClaimBlocked: undefined }));
 
     try {
-      setIdentity('lucas12@milton.edu', 'Lucas Chan');
+      setIdentity('lucas_chan26@milton.edu', 'Lucas Chan');
 
       const requests = await api.listRequests({ showClosed: true });
       const openReq = requests.find(
-        (r) => r.status === 'open' && r.createdByEmail === 'lucas12@milton.edu' && r.title?.includes('Self-claim')
+        (r) => r.status === 'open' && r.createdByEmail === 'lucas_chan26@milton.edu' && r.title?.includes('Self-claim')
       );
       if (!openReq) {
         setResult('selfClaimBlocked', false, 'No open request for self-claim test (run Seed first)');
@@ -141,13 +141,13 @@ export function QAPage() {
 
     try {
       const requests = await api.listRequests({ showClosed: true });
-      const claimedReq = requests.find((r) => r.status === 'claimed' && r.claimedByEmail === 'test34@milton.edu');
+      const claimedReq = requests.find((r) => r.status === 'claimed' && r.claimedByEmail === 'jane_doe27@milton.edu');
       if (!claimedReq) {
         setResult('commentHelper', false, 'No claimed request by Student B');
         return;
       }
 
-      setIdentity('test34@milton.edu', 'Test Student');
+      setIdentity('jane_doe27@milton.edu', 'Jane Doe');
 
       const comment = await api.addComment(claimedReq.id, 'I can help with this!');
       setResult('commentHelper', comment?.authorLabel === 'helper', comment?.authorLabel ?? '');
@@ -163,7 +163,7 @@ export function QAPage() {
     setResults((r) => ({ ...r, teacherInsights: undefined }));
 
     try {
-      setIdentity('hales@milton.edu', 'Mr. Hales');
+      setIdentity('john_smith@milton.edu', 'John Smith');
 
       const stats = await api.getInsightsStats();
       setResult('teacherInsights', stats != null, 'Stats loaded');
@@ -178,13 +178,13 @@ export function QAPage() {
 
   return (
     <div className="page">
-      <h1 className="page-title">QA Test Harness</h1>
+      <h1 className="page-title">QA Student Harness</h1>
       <p className="page-subtitle">Dev-only: Run demo flows and verify planner + support.</p>
 
       <Card>
         <h2 className="section-title">1. Seed Demo Data</h2>
         <p style={{ marginBottom: '1rem', color: 'var(--color-text-muted)' }}>
-          Creates assignment, availability, plan, and help request as Student A (lucas12@milton.edu).
+          Creates assignment, availability, plan, and help request as Student A (lucas_chan26@milton.edu).
         </p>
         <Button onClick={seedDemoData} disabled={running}>
           {running ? 'Running…' : 'Seed Demo Data'}
@@ -218,7 +218,7 @@ export function QAPage() {
       </Card>
 
       <Card>
-        <h2 className="section-title">3. Run Demo Tests</h2>
+        <h2 className="section-title">3. Run Demo Students</h2>
         <p style={{ marginBottom: '1rem', color: 'var(--color-text-muted)' }}>
           Run these in order after seeding. Identity switches are handled automatically by these actions.
         </p>

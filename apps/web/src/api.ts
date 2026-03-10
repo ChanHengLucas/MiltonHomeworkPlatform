@@ -152,6 +152,8 @@ export interface AuthUser {
   name: string;
   picture: string | null;
   isTeacher: boolean;
+  isStudent?: boolean;
+  role?: 'teacher' | 'student' | 'unknown';
   mode?: 'dev' | 'google';
   authenticated?: boolean;
 }
@@ -239,6 +241,27 @@ export interface CourseAssignment {
   createdByEmail: string;
   createdAt: string;
   courseName?: string;
+}
+
+export interface AssignmentSubmissionFile {
+  id: string;
+  submissionId: string;
+  originalName: string;
+  storedPath: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface AssignmentSubmission {
+  id: string;
+  assignmentId: string;
+  studentEmail: string;
+  comment: string | null;
+  links: string[];
+  createdAt: string;
+  updatedAt: string;
+  files: AssignmentSubmissionFile[];
 }
 
 export interface PlannerCourse {
@@ -371,6 +394,21 @@ export interface HelpComment {
   createdAt: string;
 }
 
+export interface HelpRequestResource {
+  id: string;
+  requestId: string;
+  kind: 'link' | 'file';
+  label: string | null;
+  url: string | null;
+  originalName: string | null;
+  storedPath: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  note: string | null;
+  createdAt: string;
+  createdByEmail: string | null;
+}
+
 export interface RequestsSummaryRow {
   subject: string;
   urgency: string;
@@ -433,6 +471,26 @@ export const api = {
     }),
   listCourseAssignments: (courseId: string) =>
     request<CourseAssignment[]>(`/teacher/courses/${courseId}/assignments`),
+  updateTeacherAssignment: (
+    assignmentId: string,
+    body: {
+      title?: string;
+      description?: string | null;
+      dueAtMs?: number | null;
+      estMinutes?: number;
+      type?: string;
+    }
+  ) =>
+    request<CourseAssignment>(`/teacher/assignments/${assignmentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  listTeacherAssignmentSubmissions: (assignmentId: string) =>
+    request<{ assignment: CourseAssignment; submissions: AssignmentSubmission[] }>(
+      `/teacher/assignments/${assignmentId}/submissions`
+    ),
+  getTeacherAssignmentSubmission: (assignmentId: string, submissionId: string) =>
+    request<AssignmentSubmission>(`/teacher/assignments/${assignmentId}/submissions/${submissionId}`),
   createCourseAnnouncement: (courseId: string, body: { title: string; body: string }) =>
     request<CourseAnnouncement>(`/teacher/courses/${courseId}/announcements`, {
       method: 'POST',
@@ -455,6 +513,30 @@ export const api = {
   // Student
   listStudentAssignments: () =>
     request<CourseAssignment[]>('/student/assignments'),
+  listStudentAssignmentSubmissions: () =>
+    request<AssignmentSubmission[]>('/student/assignments/submissions'),
+  getStudentAssignmentSubmission: (assignmentId: string) =>
+    request<AssignmentSubmission | null>(`/student/assignments/${assignmentId}/submission`),
+  submitStudentAssignment: (
+    assignmentId: string,
+    body: { comment?: string | null; links?: string[] }
+  ) =>
+    request<AssignmentSubmission>(`/student/assignments/${assignmentId}/submission`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  uploadStudentAssignmentFile: (
+    assignmentId: string,
+    body: {
+      fileName: string;
+      mimeType?: string | null;
+      contentBase64: string;
+    }
+  ) =>
+    request<AssignmentSubmission>(`/student/assignments/${assignmentId}/submission/files`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   listStudentCourses: () =>
     request<PlannerCourse[]>('/student/courses'),
   joinCourseByCode: (courseCode: string) =>
@@ -565,6 +647,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ body }),
     }), // authorLabel determined by backend from X-User-Email
+  listRequestResources: (requestId: string) =>
+    request<HelpRequestResource[]>(`/requests/${requestId}/resources`),
+  addRequestResourceLink: (
+    requestId: string,
+    body: { url: string; label?: string | null; note?: string | null }
+  ) =>
+    request<HelpRequestResource>(`/requests/${requestId}/resources/link`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  uploadRequestResourceFile: (
+    requestId: string,
+    body: {
+      fileName: string;
+      mimeType?: string | null;
+      contentBase64: string;
+      label?: string | null;
+      note?: string | null;
+    }
+  ) =>
+    request<HelpRequestResource>(`/requests/${requestId}/resources/file`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   listNotifications: (limit = 50) =>
     request<NotificationRecord[]>(`/notifications?limit=${encodeURIComponent(String(limit))}`),

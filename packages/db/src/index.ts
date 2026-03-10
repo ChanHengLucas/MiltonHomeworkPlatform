@@ -67,6 +67,42 @@ export interface HelpComment {
   createdAt: string;
 }
 
+export interface AssignmentSubmissionFile {
+  id: string;
+  submissionId: string;
+  originalName: string;
+  storedPath: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface AssignmentSubmission {
+  id: string;
+  assignmentId: string;
+  studentEmail: string;
+  comment: string | null;
+  links: string[];
+  createdAt: string;
+  updatedAt: string;
+  files: AssignmentSubmissionFile[];
+}
+
+export interface HelpRequestResource {
+  id: string;
+  requestId: string;
+  kind: 'link' | 'file';
+  label: string | null;
+  url: string | null;
+  originalName: string | null;
+  storedPath: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  note: string | null;
+  createdAt: string;
+  createdByEmail: string | null;
+}
+
 interface AssignmentRow {
   id: string;
   course: string;
@@ -116,6 +152,41 @@ interface HelpCommentRow {
   authorEmail?: string | null;
   body: string;
   createdAt: string;
+}
+
+interface AssignmentSubmissionRow {
+  id: string;
+  assignmentId: string;
+  studentEmail: string;
+  comment: string | null;
+  linksJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AssignmentSubmissionFileRow {
+  id: string;
+  submissionId: string;
+  originalName: string;
+  storedPath: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+interface HelpRequestResourceRow {
+  id: string;
+  requestId: string;
+  kind: string;
+  label: string | null;
+  url: string | null;
+  originalName: string | null;
+  storedPath: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  note: string | null;
+  createdAt: string;
+  createdByEmail: string | null;
 }
 
 interface RequestsSummaryRowRaw {
@@ -592,6 +663,53 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE assignments ADD COLUMN optional INTEGER NOT NULL DEFAULT 0;
       UPDATE assignments SET optional = 0 WHERE optional IS NULL;
     `
+  },
+  {
+    id: '017_submissions_and_request_resources',
+    up: `
+      CREATE TABLE IF NOT EXISTS assignment_submissions (
+        id TEXT PRIMARY KEY,
+        assignmentId TEXT NOT NULL,
+        studentEmail TEXT NOT NULL,
+        comment TEXT,
+        linksJson TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (assignmentId) REFERENCES course_assignments(id) ON DELETE CASCADE,
+        UNIQUE(assignmentId, studentEmail)
+      );
+      CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON assignment_submissions(assignmentId, updatedAt DESC);
+      CREATE INDEX IF NOT EXISTS idx_assignment_submissions_student ON assignment_submissions(studentEmail, updatedAt DESC);
+
+      CREATE TABLE IF NOT EXISTS assignment_submission_files (
+        id TEXT PRIMARY KEY,
+        submissionId TEXT NOT NULL,
+        originalName TEXT NOT NULL,
+        storedPath TEXT NOT NULL,
+        mimeType TEXT,
+        sizeBytes INTEGER NOT NULL,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (submissionId) REFERENCES assignment_submissions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_assignment_submission_files_submission ON assignment_submission_files(submissionId, createdAt ASC);
+
+      CREATE TABLE IF NOT EXISTS help_request_resources (
+        id TEXT PRIMARY KEY,
+        requestId TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        label TEXT,
+        url TEXT,
+        originalName TEXT,
+        storedPath TEXT,
+        mimeType TEXT,
+        sizeBytes INTEGER,
+        note TEXT,
+        createdAt TEXT NOT NULL,
+        createdByEmail TEXT,
+        FOREIGN KEY (requestId) REFERENCES help_requests(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_help_request_resources_request ON help_request_resources(requestId, createdAt ASC);
+    `
   }
 ];
 
@@ -976,6 +1094,214 @@ export function listCourseAssignmentsByCourse(courseId: string): CourseAssignmen
     .prepare('SELECT * FROM course_assignments WHERE courseId = ? ORDER BY dueAtMs IS NULL, dueAtMs ASC, title ASC')
     .all(courseId) as CourseAssignment[];
   return rows;
+}
+
+export function getCourseAssignment(id: string): CourseAssignment | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM course_assignments WHERE id = ?').get(id) as CourseAssignment | undefined;
+  return row ?? null;
+}
+
+export function updateCourseAssignment(
+  id: string,
+  updates: {
+    title?: string;
+    description?: string | null;
+    dueAtMs?: number | null;
+    estMinutes?: number;
+    type?: string;
+  }
+): CourseAssignment | null {
+  const setClauses: string[] = [];
+  const params: Array<string | number | null> = [];
+  if (typeof updates.title === 'string') {
+    setClauses.push('title = ?');
+    params.push(updates.title);
+  }
+  if (updates.description !== undefined) {
+    setClauses.push('description = ?');
+    params.push(updates.description ?? null);
+  }
+  if (updates.dueAtMs !== undefined) {
+    setClauses.push('dueAtMs = ?');
+    params.push(updates.dueAtMs ?? null);
+  }
+  if (typeof updates.estMinutes === 'number') {
+    setClauses.push('estMinutes = ?');
+    params.push(Math.max(5, Math.round(updates.estMinutes)));
+  }
+  if (typeof updates.type === 'string') {
+    setClauses.push('type = ?');
+    params.push(updates.type);
+  }
+  if (setClauses.length === 0) {
+    return getCourseAssignment(id);
+  }
+  params.push(id);
+  const db = getDb();
+  runWrite('course_assignments.update', () =>
+    db.prepare(`UPDATE course_assignments SET ${setClauses.join(', ')} WHERE id = ?`).run(...params)
+  );
+  return getCourseAssignment(id);
+}
+
+function parseLinksJson(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const out: string[] = [];
+    for (const item of parsed) {
+      if (typeof item !== 'string') continue;
+      const normalized = item.trim();
+      if (!normalized) continue;
+      if (out.includes(normalized)) continue;
+      out.push(normalized);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function toSubmissionFile(row: AssignmentSubmissionFileRow): AssignmentSubmissionFile {
+  return {
+    id: row.id,
+    submissionId: row.submissionId,
+    originalName: row.originalName,
+    storedPath: row.storedPath,
+    mimeType: row.mimeType ?? null,
+    sizeBytes: row.sizeBytes,
+    createdAt: row.createdAt,
+  };
+}
+
+function toSubmission(row: AssignmentSubmissionRow, files: AssignmentSubmissionFile[]): AssignmentSubmission {
+  return {
+    id: row.id,
+    assignmentId: row.assignmentId,
+    studentEmail: row.studentEmail,
+    comment: row.comment ?? null,
+    links: parseLinksJson(row.linksJson),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    files,
+  };
+}
+
+export function upsertAssignmentSubmission(input: {
+  assignmentId: string;
+  studentEmail: string;
+  comment?: string | null;
+  links?: string[];
+}): AssignmentSubmission {
+  const db = getDb();
+  const email = normalizeEmail(input.studentEmail);
+  const links = Array.from(new Set((input.links || []).map((l) => l.trim()).filter(Boolean))).slice(0, 8);
+  const comment = input.comment?.trim() ? input.comment.trim() : null;
+  const now = new Date().toISOString();
+
+  runWrite('assignment_submissions.upsert', () =>
+    db.prepare(
+      `INSERT INTO assignment_submissions
+        (id, assignmentId, studentEmail, comment, linksJson, createdAt, updatedAt)
+       VALUES
+        (@id, @assignmentId, @studentEmail, @comment, @linksJson, @createdAt, @updatedAt)
+       ON CONFLICT(assignmentId, studentEmail) DO UPDATE SET
+        comment = excluded.comment,
+        linksJson = excluded.linksJson,
+        updatedAt = excluded.updatedAt`
+    ).run({
+      id: randomUUID(),
+      assignmentId: input.assignmentId,
+      studentEmail: email,
+      comment,
+      linksJson: links.length > 0 ? JSON.stringify(links) : null,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  const row = db.prepare(
+    'SELECT * FROM assignment_submissions WHERE assignmentId = ? AND studentEmail = ?'
+  ).get(input.assignmentId, email) as AssignmentSubmissionRow;
+  const files = listAssignmentSubmissionFiles(row.id);
+  return toSubmission(row, files);
+}
+
+export function listAssignmentSubmissionFiles(submissionId: string): AssignmentSubmissionFile[] {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT * FROM assignment_submission_files WHERE submissionId = ? ORDER BY createdAt ASC'
+  ).all(submissionId) as AssignmentSubmissionFileRow[];
+  return rows.map(toSubmissionFile);
+}
+
+export function addAssignmentSubmissionFile(input: {
+  submissionId: string;
+  originalName: string;
+  storedPath: string;
+  mimeType?: string | null;
+  sizeBytes: number;
+}): AssignmentSubmissionFile {
+  const db = getDb();
+  const file: AssignmentSubmissionFile = {
+    id: randomUUID(),
+    submissionId: input.submissionId,
+    originalName: input.originalName,
+    storedPath: input.storedPath,
+    mimeType: input.mimeType ?? null,
+    sizeBytes: Math.max(0, Math.round(input.sizeBytes)),
+    createdAt: new Date().toISOString(),
+  };
+  runWrite('assignment_submission_files.insert', () =>
+    db.prepare(
+      `INSERT INTO assignment_submission_files
+        (id, submissionId, originalName, storedPath, mimeType, sizeBytes, createdAt)
+       VALUES
+        (@id, @submissionId, @originalName, @storedPath, @mimeType, @sizeBytes, @createdAt)`
+    ).run(file)
+  );
+  return file;
+}
+
+export function getAssignmentSubmissionById(id: string): AssignmentSubmission | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM assignment_submissions WHERE id = ?').get(id) as AssignmentSubmissionRow | undefined;
+  if (!row) return null;
+  const files = listAssignmentSubmissionFiles(row.id);
+  return toSubmission(row, files);
+}
+
+export function getAssignmentSubmissionByStudent(
+  assignmentId: string,
+  studentEmail: string
+): AssignmentSubmission | null {
+  const db = getDb();
+  const email = normalizeEmail(studentEmail);
+  const row = db.prepare(
+    'SELECT * FROM assignment_submissions WHERE assignmentId = ? AND studentEmail = ?'
+  ).get(assignmentId, email) as AssignmentSubmissionRow | undefined;
+  if (!row) return null;
+  const files = listAssignmentSubmissionFiles(row.id);
+  return toSubmission(row, files);
+}
+
+export function listAssignmentSubmissionsByStudent(studentEmail: string): AssignmentSubmission[] {
+  const db = getDb();
+  const email = normalizeEmail(studentEmail);
+  const rows = db.prepare(
+    'SELECT * FROM assignment_submissions WHERE studentEmail = ? ORDER BY updatedAt DESC'
+  ).all(email) as AssignmentSubmissionRow[];
+  return rows.map((row) => toSubmission(row, listAssignmentSubmissionFiles(row.id)));
+}
+
+export function listAssignmentSubmissionsByAssignment(assignmentId: string): AssignmentSubmission[] {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT * FROM assignment_submissions WHERE assignmentId = ? ORDER BY updatedAt DESC'
+  ).all(assignmentId) as AssignmentSubmissionRow[];
+  return rows.map((row) => toSubmission(row, listAssignmentSubmissionFiles(row.id)));
 }
 
 export function createCourseAnnouncement(announcement: CourseAnnouncement): CourseAnnouncement {
@@ -1685,6 +2011,69 @@ export function addComment(comment: HelpComment): HelpComment {
   );
 
   return comment;
+}
+
+function rowToHelpRequestResource(row: HelpRequestResourceRow): HelpRequestResource {
+  return {
+    id: row.id,
+    requestId: row.requestId,
+    kind: row.kind === 'file' ? 'file' : 'link',
+    label: row.label ?? null,
+    url: row.url ?? null,
+    originalName: row.originalName ?? null,
+    storedPath: row.storedPath ?? null,
+    mimeType: row.mimeType ?? null,
+    sizeBytes: row.sizeBytes ?? null,
+    note: row.note ?? null,
+    createdAt: row.createdAt,
+    createdByEmail: row.createdByEmail ?? null,
+  };
+}
+
+export function addHelpRequestResource(input: {
+  requestId: string;
+  kind: 'link' | 'file';
+  label?: string | null;
+  url?: string | null;
+  originalName?: string | null;
+  storedPath?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  note?: string | null;
+  createdByEmail?: string | null;
+}): HelpRequestResource {
+  const db = getDb();
+  const resource: HelpRequestResource = {
+    id: randomUUID(),
+    requestId: input.requestId,
+    kind: input.kind,
+    label: input.label?.trim() ? input.label.trim() : null,
+    url: input.url?.trim() ? input.url.trim() : null,
+    originalName: input.originalName?.trim() ? input.originalName.trim() : null,
+    storedPath: input.storedPath?.trim() ? input.storedPath.trim() : null,
+    mimeType: input.mimeType?.trim() ? input.mimeType.trim() : null,
+    sizeBytes: input.sizeBytes == null ? null : Math.max(0, Math.round(input.sizeBytes)),
+    note: input.note?.trim() ? input.note.trim() : null,
+    createdAt: new Date().toISOString(),
+    createdByEmail: input.createdByEmail?.trim() ? normalizeEmail(input.createdByEmail) : null,
+  };
+  runWrite('help_request_resources.insert', () =>
+    db.prepare(
+      `INSERT INTO help_request_resources
+        (id, requestId, kind, label, url, originalName, storedPath, mimeType, sizeBytes, note, createdAt, createdByEmail)
+       VALUES
+        (@id, @requestId, @kind, @label, @url, @originalName, @storedPath, @mimeType, @sizeBytes, @note, @createdAt, @createdByEmail)`
+    ).run(resource)
+  );
+  return resource;
+}
+
+export function listHelpRequestResources(requestId: string): HelpRequestResource[] {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT * FROM help_request_resources WHERE requestId = ? ORDER BY createdAt ASC'
+  ).all(requestId) as HelpRequestResourceRow[];
+  return rows.map(rowToHelpRequestResource);
 }
 
 // Claim limits & blocklist

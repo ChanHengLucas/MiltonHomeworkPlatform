@@ -13,8 +13,10 @@ Monorepo for a school planner + support hub:
   - `google` mode when OAuth env vars are configured (always in production)
 - Dev/test identity simulation with Dev Identity Switcher (`/dev`)
 - Personal assignments (including optional-task flag) + teacher-published assignments + teacher grading tasks
+- Student homework submissions for teacher assignments (links/comments + local file metadata uploads)
 - Availability + deterministic plan generation (including Google Calendar busy blocks)
 - Support Hub claim/unclaim/close/report flows with visibility rules
+- Support request resources (links/files metadata) visible in request detail
 - Teacher-only Insights and teacher-only dashboard routes
 - Server-backed planner preferences (study window, max session, breaks, late-night avoidance, optional course weights)
 - In-app notifications (assignment posts, support lifecycle updates, comments, due reminders) with read/unread state
@@ -102,7 +104,14 @@ Default URLs:
 
 Teacher eligibility:
 - `@milton.edu` domain
-- NOT student pattern (two digits before `@`)
+- Student pattern: `first_lastNN@milton.edu` (two-digit class year suffix)
+- Teacher/staff pattern: `first_last@milton.edu`
+- Non-matching Milton addresses are treated as non-teacher.
+
+Helper functions used across API/web:
+- `isMiltonEmail(email)`
+- `isStudentEmail(email)`
+- `isTeacherEligible(email)`
 
 ## Planner Preferences
 
@@ -141,6 +150,31 @@ Planner uses these rules on every `/api/plan` call.
 - UI:
   - header bell + quick panel
   - full `/notifications` page
+
+## Homework Submissions
+
+- Student endpoints:
+  - `GET /api/student/assignments/submissions`
+  - `GET /api/student/assignments/:assignmentId/submission`
+  - `PUT /api/student/assignments/:assignmentId/submission` (comment + links)
+  - `POST /api/student/assignments/:assignmentId/submission/files` (base64 file upload -> local `data/uploads`)
+- Teacher endpoints:
+  - `GET /api/teacher/assignments/:id/submissions`
+  - `GET /api/teacher/assignments/:id/submissions/:submissionId`
+  - `PATCH /api/teacher/assignments/:id` (basic assignment edits)
+- UI:
+  - Student `/assignments`: submit/edit work per teacher assignment
+  - Teacher `/teacher/homework`: inspect submission list by assignment
+
+## Support Resources
+
+- Endpoints:
+  - `GET /api/requests/:id/resources`
+  - `POST /api/requests/:id/resources/link`
+  - `POST /api/requests/:id/resources/file`
+- UI:
+  - Request creation supports optional link/file metadata + note
+  - Request detail lists resources and allows participants to add new ones while open
 
 ## Course Feedback
 

@@ -16,8 +16,7 @@ import { InsightsPage } from './pages/InsightsPage';
 import { LoginPage } from './pages/LoginPage';
 import { TeacherDashboardPage } from './pages/TeacherDashboardPage';
 import { NotificationsPage } from './pages/NotificationsPage';
-
-import './App.css';
+import { useAppState } from './context/AppContext';
 
 const DevQAPage = import.meta.env.DEV
   ? lazy(() => import('./pages/QAPage').then((m) => ({ default: m.QAPage })))
@@ -26,6 +25,14 @@ const DevQAPage = import.meta.env.DEV
 const DevToolsPage = import.meta.env.DEV
   ? lazy(() => import('./pages/DevPage').then((m) => ({ default: m.DevPage })))
   : null;
+
+function AssignmentsRoute() {
+  const { teacherEligible } = useAppState();
+  if (teacherEligible) {
+    return <Navigate to="/teacher/homework" replace />;
+  }
+  return <AssignmentsPage />;
+}
 
 function App() {
   return (
@@ -46,13 +53,14 @@ function App() {
             )}
             <Route path="/" element={<Navigate to="/assignments" replace />} />
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-              <Route path="assignments" element={<AssignmentsPage />} />
+              <Route path="assignments" element={<AssignmentsRoute />} />
               <Route path="courses" element={<CoursesPage />} />
               <Route path="plan" element={<PlanPage />} />
               <Route path="availability" element={<AvailabilityPage />} />
               <Route path="support" element={<SupportPage />} />
               <Route path="support/:id" element={<SupportDetailPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
+              <Route path="teacher/homework" element={<TeacherDashboardPage />} />
               <Route path="teacher" element={<TeacherDashboardPage />} />
               <Route path="insights" element={<InsightsPage />} />
               <Route path="settings" element={<SettingsPage />} />

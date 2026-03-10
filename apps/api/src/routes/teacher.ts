@@ -2,11 +2,15 @@ import { randomUUID } from 'crypto';
 import { Router, Request } from 'express';
 import { z } from 'zod';
 import {
+  getCourseAssignment,
   createCourse,
   listCoursesByTeacher,
   getCourseByCode,
   getCourse,
   addCourseMember,
+  updateCourseAssignment,
+  listAssignmentSubmissionsByAssignment,
+  getAssignmentSubmissionById,
   listCourseMembers,
   createCourseAssignment,
   listCourseAssignmentsByCourse,
@@ -48,6 +52,14 @@ const createAnnouncementSchema = z.object({
   body: z.string().min(1, 'Announcement body is required'),
 });
 
+const updateAssignmentSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional().nullable(),
+  dueAtMs: z.number().int().optional().nullable(),
+  estMinutes: z.number().int().min(5).optional(),
+  type: z.enum(['homework', 'quiz', 'test', 'project', 'reading', 'other']).optional(),
+});
+
 function generateCourseCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let out = '';
@@ -70,6 +82,14 @@ function createUniqueCourseCode(maxAttempts = 20): string {
 export const teacherRouter = Router();
 
 teacherRouter.use(requireTeacher);
+
+function getTeacherAssignmentOr404(assignmentId: string, teacherEmail: string) {
+  const assignment = getCourseAssignment(assignmentId);
+  if (!assignment) return null;
+  const course = getCourse(assignment.courseId);
+  if (!course || course.teacherEmail !== teacherEmail) return null;
+  return { assignment, course };
+}
 
 teacherRouter.post('/courses', (req: Request, res, next) => {
   const parsed = createCourseSchema.safeParse(req.body);
@@ -177,6 +197,54 @@ teacherRouter.get('/courses/:id/assignments', (req: Request, res) => {
   }
   const assignments = listCourseAssignmentsByCourse(course.id);
   res.json(assignments);
+});
+
+teacherRouter.patch('/assignments/:id', (req: Request, res, next) => {
+  const owned = getTeacherAssignmentOr404(req.params.id, req.user!.email);
+  if (!owned) {
+    return res.status(404).json({ error: 'Assignment not found' });
+  }
+  const parsed = updateAssignmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const err = new Error(parsed.error.errors.map((e) => e.message).join('; ')) as Error & { statusCode?: number };
+    err.statusCode = 400;
+    return next(err);
+  }
+  const payload = parsed.data;
+  if (Object.keys(payload).length === 0) {
+    const err = new Error('At least one assignment field is required') as Error & { statusCode?: number };
+    err.statusCode = 400;
+    return next(err);
+  }
+  const updated = updateCourseAssignment(req.params.id, payload);
+  if (!updated) {
+    return res.status(404).json({ error: 'Assignment not found' });
+  }
+  res.json(updated);
+});
+
+teacherRouter.get('/assignments/:id/submissions', (req: Request, res) => {
+  const owned = getTeacherAssignmentOr404(req.params.id, req.user!.email);
+  if (!owned) {
+    return res.status(404).json({ error: 'Assignment not found' });
+  }
+  const submissions = listAssignmentSubmissionsByAssignment(req.params.id);
+  res.json({
+    assignment: owned.assignment,
+    submissions,
+  });
+});
+
+teacherRouter.get('/assignments/:id/submissions/:submissionId', (req: Request, res) => {
+  const owned = getTeacherAssignmentOr404(req.params.id, req.user!.email);
+  if (!owned) {
+    return res.status(404).json({ error: 'Assignment not found' });
+  }
+  const submission = getAssignmentSubmissionById(req.params.submissionId);
+  if (!submission || submission.assignmentId !== req.params.id) {
+    return res.status(404).json({ error: 'Submission not found' });
+  }
+  res.json(submission);
 });
 
 teacherRouter.post('/courses/:id/announcements', (req: Request, res, next) => {

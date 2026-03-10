@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Outlet, NavLink } from 'react-router-dom';
 import { api, type NotificationRecord } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useAppState } from '../context/AppContext';
+import { useIdentity } from '../hooks/useIdentity';
 
 export function Layout() {
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const { clearDevIdentity, refetchGoogleIdentity } = useIdentity();
   const { teacherEligible, displayName, identitySource } = useAppState();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
@@ -15,7 +19,7 @@ export function Layout() {
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
 
   const navItems = [
-    { to: '/assignments', label: 'Assignments' },
+    { to: teacherEligible ? '/teacher/homework' : '/assignments', label: teacherEligible ? 'Homework' : 'Assignments' },
     { to: '/courses', label: 'Courses' },
     { to: '/plan', label: 'Plan' },
     { to: '/availability', label: 'Availability' },
@@ -130,6 +134,17 @@ export function Layout() {
     setNotificationsOpen((open) => !open);
   }
 
+  async function handleSignOut() {
+    if (identitySource === 'dev') {
+      clearDevIdentity();
+      await refetchGoogleIdentity();
+      navigate('/login', { replace: true });
+      return;
+    }
+    await logout();
+    navigate('/login', { replace: true });
+  }
+
   async function markNotificationRead(id: string) {
     try {
       await api.markNotificationRead(id);
@@ -203,6 +218,13 @@ export function Layout() {
             >
               <span>Notifications</span>
               {unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+            </button>
+            <button
+              type="button"
+              className="ui-btn btn-secondary btn-sm"
+              onClick={handleSignOut}
+            >
+              Log out
             </button>
             {notificationsOpen && (
               <div className="notifications-panel ui-modal">

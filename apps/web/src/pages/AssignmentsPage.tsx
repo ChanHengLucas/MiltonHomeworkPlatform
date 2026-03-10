@@ -1,7 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { api, type Assignment, type CourseAssignment } from '../api';
+import {
+  api,
+  type Assignment,
+  type AssignmentSubmission,
+  type CourseAssignment,
+} from '../api';
 import { Button, Card, Callout } from '../components/ui';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { fromDateTimeLocalValue, formatDueDate } from '../utils/datetime';
@@ -14,11 +19,53 @@ const PRIORITY_OPTIONS = [
   { value: 5, label: 'High' },
 ];
 
+interface SubmissionDraft {
+  comment: string;
+  linksText: string;
+  file: File | null;
+}
+
+function linksToText(links: string[]): string {
+  return links.join('\n');
+}
+
+function parseLinks(linksText: string): string[] {
+  return Array.from(
+    new Set(
+      linksText
+        .split(/\n|,/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 8);
+}
+
+function toBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('Failed to process file'));
+        return;
+      }
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      resolve(base64);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function AssignmentsPage() {
   const navigate = useNavigate();
   const { isSignedIn } = useAuthGate();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teacherAssignments, setTeacherAssignments] = useState<CourseAssignment[]>([]);
+  const [submissionByAssignment, setSubmissionByAssignment] = useState<Record<string, AssignmentSubmission>>({});
+  const [submissionDrafts, setSubmissionDrafts] = useState<Record<string, SubmissionDraft>>({});
+  const [openSubmissionId, setOpenSubmissionId] = useState<string | null>(null);
+  const [submissionBusyId, setSubmissionBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [parseText, setParseText] = useState('');
@@ -41,6 +88,9 @@ export function AssignmentsPage() {
       setLoading(false);
       setAssignments([]);
       setTeacherAssignments([]);
+      setSubmissionByAssignment({});
+      setSubmissionDrafts({});
+      setOpenSubmissionId(null);
       setError(null);
       return;
     }
@@ -53,12 +103,18 @@ export function AssignmentsPage() {
     try {
       setLoading(true);
       setError(null);
-      const [personal, fromTeachers] = await Promise.all([
+      const [personal, fromTeachers, submissions] = await Promise.all([
         api.listAssignments(),
         api.listStudentAssignments().catch(() => []),
+        api.listStudentAssignmentSubmissions().catch(() => []),
       ]);
       setAssignments(personal);
       setTeacherAssignments(fromTeachers);
+      const submissionMap: Record<string, AssignmentSubmission> = {};
+      submissions.forEach((submission) => {
+        submissionMap[submission.assignmentId] = submission;
+      });
+      setSubmissionByAssignment(submissionMap);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load assignments';
       setError(msg);
@@ -156,6 +212,80 @@ export function AssignmentsPage() {
       setError(msg);
       console.error('[Planner] [API]', msg);
     }
+  }
+
+  function ensureSubmissionDraft(assignmentId: string) {
+    setSubmissionDrafts((prev) => {
+      if (prev[assignmentId]) return prev;
+      const existing = submissionByAssignment[assignmentId];
+      return {
+        ...prev,
+        [assignmentId]: {
+          comment: existing?.comment ?? '',
+          linksText: linksToText(existing?.links ?? []),
+          file: null,
+        },
+      };
+    });
+  }
+
+  function updateSubmissionDraft(
+    assignmentId: string,
+    update: Partial<SubmissionDraft>
+  ) {
+    setSubmissionDrafts((prev) => {
+      const current = prev[assignmentId] ?? { comment: '', linksText: '', file: null };
+      return {
+        ...prev,
+        [assignmentId]: { ...current, ...update },
+      };
+    });
+  }
+
+  async function handleSaveSubmission(assignment: CourseAssignment) {
+    const draft = submissionDrafts[assignment.id] ?? { comment: '', linksText: '', file: null };
+    try {
+      setSubmissionBusyId(assignment.id);
+      setError(null);
+      const saved = await api.submitStudentAssignment(assignment.id, {
+        comment: draft.comment.trim() || null,
+        links: parseLinks(draft.linksText),
+      });
+      setSubmissionByAssignment((prev) => ({ ...prev, [assignment.id]: saved }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save submission');
+    } finally {
+      setSubmissionBusyId(null);
+    }
+  }
+
+  async function handleUploadSubmissionFile(assignment: CourseAssignment) {
+    const draft = submissionDrafts[assignment.id];
+    if (!draft?.file) {
+      setError('Choose a file before uploading.');
+      return;
+    }
+    try {
+      setSubmissionBusyId(assignment.id);
+      setError(null);
+      const contentBase64 = await toBase64(draft.file);
+      const updated = await api.uploadStudentAssignmentFile(assignment.id, {
+        fileName: draft.file.name,
+        mimeType: draft.file.type || null,
+        contentBase64,
+      });
+      setSubmissionByAssignment((prev) => ({ ...prev, [assignment.id]: updated }));
+      updateSubmissionDraft(assignment.id, { file: null });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to upload file');
+    } finally {
+      setSubmissionBusyId(null);
+    }
+  }
+
+  function handleSubmissionFileChange(assignmentId: string, event: ChangeEvent<HTMLInputElement>) {
+    const nextFile = event.target.files?.[0] ?? null;
+    updateSubmissionDraft(assignmentId, { file: nextFile });
   }
 
   return (
@@ -296,19 +426,144 @@ export function AssignmentsPage() {
           </p>
         ) : (
           <div className="assignment-list" style={{ marginTop: '0.75rem' }}>
-            {teacherAssignments.map((a) => (
-              <div key={a.id} className="assignment-card">
-                <div className="assignment-card-content">
-                  <div className="assignment-card-title">{a.title}</div>
+            {teacherAssignments.map((assignment) => {
+              const submission = submissionByAssignment[assignment.id];
+              const isOpen = openSubmissionId === assignment.id;
+              const draft = submissionDrafts[assignment.id] ?? {
+                comment: submission?.comment ?? '',
+                linksText: linksToText(submission?.links ?? []),
+                file: null,
+              };
+              return (
+                <div key={assignment.id} className="assignment-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <div className="split-header">
+                    <div className="assignment-card-title">{assignment.title}</div>
+                    <span className={`status-chip ${submission ? 'status-claimed' : 'status-open'}`}>
+                      {submission ? 'Submitted' : 'Not submitted'}
+                    </span>
+                  </div>
                   <div className="assignment-card-meta">
-                    {a.courseName ?? a.courseId} · {a.estMinutes} min
-                    {a.dueAtMs
-                      ? ` · Due ${formatDueDate(a.dueAtMs)}`
+                    {assignment.courseName ?? assignment.courseId} · {assignment.estMinutes} min
+                    {assignment.dueAtMs
+                      ? ` · Due ${formatDueDate(assignment.dueAtMs)}`
                       : ' · No due date'}
                   </div>
+                  {submission && (
+                    <div style={{ marginTop: '0.45rem' }}>
+                      {submission.comment && (
+                        <p className="form-hint" style={{ margin: '0.25rem 0' }}>
+                          Latest note: {submission.comment}
+                        </p>
+                      )}
+                      {submission.links.length > 0 && (
+                        <p className="form-hint" style={{ margin: '0.25rem 0' }}>
+                          Links: {submission.links.length}
+                        </p>
+                      )}
+                      {submission.files.length > 0 && (
+                        <p className="form-hint" style={{ margin: '0.25rem 0' }}>
+                          Files: {submission.files.length}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <div className="assignment-card-actions" style={{ marginTop: '0.65rem' }}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        ensureSubmissionDraft(assignment.id);
+                        setOpenSubmissionId((prev) => (prev === assignment.id ? null : assignment.id));
+                      }}
+                    >
+                      {isOpen ? 'Hide submission' : submission ? 'Edit submission' : 'Submit work'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        navigate(
+                          `/support?new=true&title=${encodeURIComponent(`Help with: ${assignment.title}`)}&linkedAssignmentId=${assignment.id}`,
+                        )
+                      }
+                    >
+                      Need help
+                    </Button>
+                  </div>
+                  {isOpen && (
+                    <div style={{ marginTop: '0.85rem', borderTop: '1px solid var(--color-border)', paddingTop: '0.85rem' }}>
+                      <div className="form-grid form-grid-wide">
+                        <div className="form-group form-group-wide">
+                          <label>Comment/notes</label>
+                          <textarea
+                            className="ui-textarea"
+                            aria-label="Comment/notes"
+                            value={draft.comment}
+                            onChange={(e) => updateSubmissionDraft(assignment.id, { comment: e.target.value })}
+                            placeholder="What did you complete? Any notes for your teacher?"
+                            style={{ minHeight: 88 }}
+                          />
+                        </div>
+                        <div className="form-group form-group-wide">
+                          <label>Links (one per line)</label>
+                          <textarea
+                            className="ui-textarea"
+                            aria-label="Links (one per line)"
+                            value={draft.linksText}
+                            onChange={(e) => updateSubmissionDraft(assignment.id, { linksText: e.target.value })}
+                            placeholder="https://docs.google.com/..."
+                            style={{ minHeight: 72 }}
+                          />
+                        </div>
+                        <div className="form-group form-group-wide">
+                          <label>Upload file (optional)</label>
+                          <input
+                            type="file"
+                            className="ui-input"
+                            aria-label="Upload file"
+                            onChange={(event) => handleSubmissionFileChange(assignment.id, event)}
+                          />
+                          {draft.file && (
+                            <small className="form-hint">
+                              Selected: {draft.file.name} ({Math.round(draft.file.size / 1024)} KB)
+                            </small>
+                          )}
+                        </div>
+                      </div>
+                      <div className="form-actions">
+                        <Button
+                          size="sm"
+                          onClick={() => handleSaveSubmission(assignment)}
+                          disabled={submissionBusyId === assignment.id}
+                        >
+                          {submissionBusyId === assignment.id ? 'Saving…' : 'Save submission'}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleUploadSubmissionFile(assignment)}
+                          disabled={submissionBusyId === assignment.id || !draft.file}
+                        >
+                          {submissionBusyId === assignment.id ? 'Uploading…' : 'Upload file'}
+                        </Button>
+                      </div>
+                      {submission?.files && submission.files.length > 0 && (
+                        <div style={{ marginTop: '0.55rem' }}>
+                          <p className="form-hint" style={{ margin: '0 0 0.25rem 0' }}>Uploaded files</p>
+                          <ul style={{ margin: 0, paddingLeft: '1rem' }}>
+                            {submission.files.map((file) => (
+                              <li key={file.id} className="form-hint">
+                                {file.originalName} ({Math.round(file.sizeBytes / 1024)} KB)
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>

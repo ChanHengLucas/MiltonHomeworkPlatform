@@ -2,9 +2,9 @@ import { useAppState } from '../context/AppContext';
 import { useIdentity } from '../hooks/useIdentity';
 
 const PRESETS = [
-  { id: 'student-a', email: 'lucas12@milton.edu', name: 'Lucas Chan', label: 'Student A' },
-  { id: 'student-b', email: 'test34@milton.edu', name: 'Test Student', label: 'Student B' },
-  { id: 'teacher', email: 'hales@milton.edu', name: 'Mr. Hales', label: 'Teacher' },
+  { id: 'student-a', email: 'lucas_chan26@milton.edu', name: 'Lucas Chan', label: 'Student A' },
+  { id: 'student-b', email: 'jane_doe27@milton.edu', name: 'Jane Doe', label: 'Student B' },
+  { id: 'teacher', email: 'john_smith@milton.edu', name: 'John Smith', label: 'Teacher' },
 ] as const;
 
 export function DevIdentitySwitcher() {

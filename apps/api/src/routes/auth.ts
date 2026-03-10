@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { OAuth2Client } from 'google-auth-library';
-import { isTeacherEligible } from '../utils/identity';
+import { isMiltonEmail, isStudentEmail, isTeacherEligible } from '../utils/identity';
 import { getAuthModeInfo, getWebOriginFallback } from '../config/authMode';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -21,6 +21,13 @@ declare module 'express-session' {
 }
 
 export const authRouter = Router();
+
+function roleFromEmail(email: string): 'teacher' | 'student' | 'unknown' {
+  if (!isMiltonEmail(email)) return 'unknown';
+  if (isTeacherEligible(email)) return 'teacher';
+  if (isStudentEmail(email)) return 'student';
+  return 'unknown';
+}
 
 function getOAuthClient(): OAuth2Client {
   return new OAuth2Client(
@@ -164,6 +171,8 @@ authRouter.get('/me', (req: Request, res: Response) => {
       name,
       picture: null,
       isTeacher: isTeacherEligible(email),
+      isStudent: isStudentEmail(email),
+      role: roleFromEmail(email),
       mode: 'dev',
       authenticated: Boolean(email),
     });
@@ -179,6 +188,8 @@ authRouter.get('/me', (req: Request, res: Response) => {
     name: user.name,
     picture: user.picture ?? null,
     isTeacher: isTeacherEligible(user.email),
+    isStudent: isStudentEmail(user.email),
+    role: roleFromEmail(user.email),
     mode: 'google',
     authenticated: true,
   });

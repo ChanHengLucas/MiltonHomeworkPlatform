@@ -5,8 +5,8 @@ const API_BASE = process.env.API_BASE || 'http://localhost:4000';
 
 const teacherHeaders = {
   'content-type': 'application/json',
-  'x-user-email': 'hales@milton.edu',
-  'x-user-name': 'Mr. Hales',
+  'x-user-email': 'john_smith@milton.edu',
+  'x-user-name': 'John Smith',
 };
 
 test.describe('Courses and announcements', () => {

@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
-import { api, type HelpRequest, type HelpComment, type RequestActivityEntry } from '../api';
+import {
+  api,
+  type HelpRequest,
+  type HelpComment,
+  type HelpRequestResource,
+  type RequestActivityEntry,
+} from '../api';
 import { useAppState } from '../context/AppContext';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { isTeacherEligible } from '../utils/identity';
@@ -23,6 +29,7 @@ export function SupportDetailPage() {
   const { suggestedClaimName, schoolEmail } = useAppState();
   const [request, setRequest] = useState<HelpRequest | null>(null);
   const [comments, setComments] = useState<HelpComment[]>([]);
+  const [resources, setResources] = useState<HelpRequestResource[]>([]);
   const [activity, setActivity] = useState<RequestActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +42,9 @@ export function SupportDetailPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState<'spam' | 'trolling' | 'no_show' | 'other'>('no_show');
   const [reportDetails, setReportDetails] = useState('');
+  const [resourceLink, setResourceLink] = useState('');
+  const [resourceNote, setResourceNote] = useState('');
+  const [resourceFile, setResourceFile] = useState<File | null>(null);
 
   const load = useCallback(async () => {
     if (!id || !isSignedIn) return;
@@ -42,20 +52,23 @@ export function SupportDetailPage() {
       setLoading(true);
       setError(null);
       setNotAvailable(false);
-      const [req, cmts, act] = await Promise.all([
+      const [req, cmts, act, resResources] = await Promise.all([
         api.getRequest(id),
         api.listComments(id),
         api.getRequestActivity(id),
+        api.listRequestResources(id),
       ]);
       setRequest(req);
       setComments(cmts);
       setActivity(act);
+      setResources(resResources);
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 403) {
         setNotAvailable(true);
         setRequest(null);
         setComments([]);
+        setResources([]);
         setActivity([]);
       } else {
         setError(err.message || 'Failed to load');
@@ -70,6 +83,7 @@ export function SupportDetailPage() {
       setLoading(false);
       setRequest(null);
       setComments([]);
+      setResources([]);
       setActivity([]);
       setError(null);
       setNotAvailable(false);
@@ -173,6 +187,67 @@ export function SupportDetailPage() {
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to report');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleAddResourceLink() {
+    if (!isSignedIn || !id) return;
+    if (!resourceLink.trim()) {
+      setError('Enter a valid resource link');
+      return;
+    }
+    try {
+      setActionLoading('resource-link');
+      setError(null);
+      await api.addRequestResourceLink(id, {
+        url: resourceLink.trim(),
+        note: resourceNote.trim() || null,
+      });
+      setResourceLink('');
+      setResourceNote('');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to add resource link');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleUploadResourceFile() {
+    if (!isSignedIn || !id) return;
+    if (!resourceFile) {
+      setError('Choose a file to upload');
+      return;
+    }
+    try {
+      setActionLoading('resource-file');
+      setError(null);
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read upload file'));
+        reader.onload = () => {
+          if (typeof reader.result !== 'string') {
+            reject(new Error('Failed to process upload file'));
+            return;
+          }
+          const base64 = reader.result.includes(',') ? reader.result.split(',')[1] : reader.result;
+          resolve(base64);
+        };
+        reader.readAsDataURL(resourceFile);
+      });
+      await api.uploadRequestResourceFile(id, {
+        fileName: resourceFile.name,
+        mimeType: resourceFile.type || null,
+        contentBase64,
+        note: resourceNote.trim() || null,
+      });
+      setResourceFile(null);
+      setResourceNote('');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to upload resource file');
     } finally {
       setActionLoading(null);
     }
@@ -331,6 +406,99 @@ export function SupportDetailPage() {
             </Button>
           )}
         </div>
+      </Card>
+
+      <Card>
+        <h2 className="section-title">Attachments & resources</h2>
+        {resources.length === 0 ? (
+          <p className="empty-state">No files or links attached yet.</p>
+        ) : (
+          <div className="assignment-list">
+            {resources.map((resource) => (
+              <div key={resource.id} className="assignment-card">
+                <div className="assignment-card-content">
+                  <div className="assignment-card-title">
+                    {resource.label || resource.originalName || resource.url || 'Resource'}
+                  </div>
+                  <div className="assignment-card-meta">
+                    {resource.kind === 'file' ? 'File' : 'Link'} · {new Date(resource.createdAt).toLocaleString()}
+                    {resource.createdByEmail ? ` · ${resource.createdByEmail}` : ''}
+                  </div>
+                  {resource.note && (
+                    <p style={{ margin: '0.35rem 0 0 0', whiteSpace: 'pre-wrap' }}>{resource.note}</p>
+                  )}
+                </div>
+                <div className="assignment-card-actions">
+                  {resource.url && (
+                    <a className="link" href={resource.url} target="_blank" rel="noreferrer">
+                      Open link
+                    </a>
+                  )}
+                  {resource.kind === 'file' && resource.storedPath && (
+                    <span className="form-hint">
+                      {resource.originalName || 'File'} ({Math.round((resource.sizeBytes || 0) / 1024)} KB)
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {(request.status !== 'closed') && (
+          <div style={{ marginTop: '0.9rem', borderTop: '1px solid var(--color-border)', paddingTop: '0.85rem' }}>
+            <div className="form-grid form-grid-wide">
+              <div className="form-group form-group-wide">
+                <label>Add link</label>
+                <input
+                  className="ui-input"
+                  value={resourceLink}
+                  onChange={(e) => setResourceLink(e.target.value)}
+                  placeholder="https://..."
+                />
+              </div>
+              <div className="form-group form-group-wide">
+                <label>Upload file</label>
+                <input
+                  type="file"
+                  className="ui-input"
+                  onChange={(e) => setResourceFile(e.target.files?.[0] ?? null)}
+                />
+                {resourceFile && (
+                  <small className="form-hint">
+                    Selected: {resourceFile.name} ({Math.round(resourceFile.size / 1024)} KB)
+                  </small>
+                )}
+              </div>
+              <div className="form-group form-group-wide">
+                <label>Note (optional)</label>
+                <textarea
+                  className="ui-textarea"
+                  value={resourceNote}
+                  onChange={(e) => setResourceNote(e.target.value)}
+                  placeholder="Context for this attachment"
+                  style={{ minHeight: 70 }}
+                />
+              </div>
+            </div>
+            <div className="form-actions">
+              <Button
+                size="sm"
+                onClick={handleAddResourceLink}
+                disabled={!!actionLoading || !resourceLink.trim()}
+              >
+                {actionLoading === 'resource-link' ? 'Adding…' : 'Add link'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleUploadResourceFile}
+                disabled={!!actionLoading || !resourceFile}
+              >
+                {actionLoading === 'resource-file' ? 'Uploading…' : 'Upload file'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {activity.length > 0 && (

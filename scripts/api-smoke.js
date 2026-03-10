@@ -50,6 +50,32 @@ async function run() {
     console.log('PASS: /api/health');
   }
 
+  const authMeStudent = await request(
+    'GET',
+    '/api/auth/me',
+    null,
+    { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas Chan' }
+  );
+  if (authMeStudent.status !== 200 || authMeStudent.data?.role !== 'student' || authMeStudent.data?.isTeacher) {
+    console.error('FAIL: auth role detection (student)', authMeStudent.status, authMeStudent.data);
+    failed++;
+  } else {
+    console.log('PASS: auth role detection (student)');
+  }
+
+  const authMeTeacher = await request(
+    'GET',
+    '/api/auth/me',
+    null,
+    { 'x-user-email': 'john_smith@milton.edu', 'x-user-name': 'John Smith' }
+  );
+  if (authMeTeacher.status !== 200 || authMeTeacher.data?.role !== 'teacher' || !authMeTeacher.data?.isTeacher) {
+    console.error('FAIL: auth role detection (teacher)', authMeTeacher.status, authMeTeacher.data);
+    failed++;
+  } else {
+    console.log('PASS: auth role detection (teacher)');
+  }
+
   // DB health probe
   const dbHealth = await request('GET', '/api/db/health');
   if (dbHealth.status !== 200 || !dbHealth.data?.ok || !dbHealth.data?.dbFile) {
@@ -89,11 +115,11 @@ async function run() {
     '/api/requests',
     {
       title: 'Smoke test request',
-      description: 'Test',
+      description: 'Student',
       subject: 'Math',
       urgency: 'med',
     },
-    { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+    { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
   );
   if (createR.status !== 201 || !createR.data?.id) {
     console.error('FAIL: create request');
@@ -105,6 +131,31 @@ async function run() {
   if (!reqId) {
     console.error('FAIL: no request id from create');
     failed++;
+  }
+  if (reqId) {
+    const addResourceLink = await request(
+      'POST',
+      `/api/requests/${reqId}/resources/link`,
+      { url: 'https://example.com/help-doc', note: 'Reference sheet' },
+      { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
+    );
+    if (addResourceLink.status !== 201 || !addResourceLink.data?.id) {
+      console.error('FAIL: add support resource link', addResourceLink.status, addResourceLink.data);
+      failed++;
+    } else {
+      const listResources = await request(
+        'GET',
+        `/api/requests/${reqId}/resources`,
+        null,
+        { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
+      );
+      if (listResources.status !== 200 || !Array.isArray(listResources.data) || listResources.data.length < 1) {
+        console.error('FAIL: list support resources', listResources.status, listResources.data);
+        failed++;
+      } else {
+        console.log('PASS: support request resources');
+      }
+    }
   }
 
   // Teacher-only request claim restriction
@@ -118,7 +169,7 @@ async function run() {
       urgency: 'med',
       claimMode: 'teacher_only',
     },
-    { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+    { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
   );
   if (createRestricted.status !== 201 || !createRestricted.data?.id) {
     console.error('FAIL: create teacher-only request');
@@ -127,8 +178,8 @@ async function run() {
     const blocked = await request(
       'POST',
       `/api/requests/${createRestricted.data.id}/claim`,
-      { claimedBy: 'Test Student' },
-      { 'x-user-email': 'test34@milton.edu', 'x-user-name': 'Test Student' }
+      { claimedBy: 'Jane Doe' },
+      { 'x-user-email': 'jane_doe27@milton.edu', 'x-user-name': 'Jane Doe' }
     );
     if (blocked.status !== 403) {
       console.error('FAIL: teacher-only claim should block student', blocked.status, blocked.data);
@@ -147,7 +198,7 @@ async function run() {
       'POST',
       `/api/requests/${reqId}/claim`,
       { claimedBy: 'Lucas' },
-      { 'X-User-Email': 'lucas12@milton.edu', 'X-User-Name': 'Lucas' }
+      { 'X-User-Email': 'lucas_chan26@milton.edu', 'X-User-Name': 'Lucas' }
     );
     if (selfClaim.status === 200) {
       console.error('FAIL: self-claim should be blocked (got 200)', JSON.stringify(selfClaim.data));
@@ -164,8 +215,8 @@ async function run() {
   const claimB = await request(
     'POST',
     `/api/requests/${reqId}/claim`,
-    { claimedBy: 'Test Student' },
-    { 'X-User-Email': 'test34@milton.edu', 'X-User-Name': 'Test Student' }
+    { claimedBy: 'Jane Doe' },
+    { 'X-User-Email': 'jane_doe27@milton.edu', 'X-User-Name': 'Jane Doe' }
   );
   if (claimB.status !== 200 || claimB.data?.status !== 'claimed') {
     console.error('FAIL: claim as Student B');
@@ -180,7 +231,7 @@ async function run() {
     'POST',
     '/api/teacher/courses',
     { name: `Smoke Course ${suffix}` },
-    { 'x-user-email': 'hales@milton.edu', 'x-user-name': 'Mr. Hales' }
+    { 'x-user-email': 'john_smith@milton.edu', 'x-user-name': 'John Smith' }
   );
   if (createCourse.status !== 201 || !createCourse.data?.id || !createCourse.data?.courseCode) {
     console.error('FAIL: create teacher course for notifications/feedback', createCourse.status, createCourse.data);
@@ -190,7 +241,7 @@ async function run() {
       'POST',
       '/api/student/courses/join-code',
       { courseCode: createCourse.data.courseCode },
-      { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+      { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
     );
     if (joinByCode.status !== 200) {
       console.error('FAIL: join course by code', joinByCode.status, joinByCode.data);
@@ -206,17 +257,62 @@ async function run() {
           estMinutes: 30,
           type: 'homework',
         },
-        { 'x-user-email': 'hales@milton.edu', 'x-user-name': 'Mr. Hales' }
+        { 'x-user-email': 'john_smith@milton.edu', 'x-user-name': 'John Smith' }
       );
       if (postAssignment.status !== 201) {
         console.error('FAIL: post assignment for notification', postAssignment.status, postAssignment.data);
         failed++;
       } else {
+        const studentSubmission = await request(
+          'PUT',
+          `/api/student/assignments/${postAssignment.data.id}/submission`,
+          {
+            comment: 'Draft completed and shared via link.',
+            links: ['https://docs.google.com/document/d/demo'],
+          },
+          { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
+        );
+        if (studentSubmission.status !== 200 || !studentSubmission.data?.id) {
+          console.error('FAIL: student assignment submission', studentSubmission.status, studentSubmission.data);
+          failed++;
+        } else {
+          const uploadSubmissionFile = await request(
+            'POST',
+            `/api/student/assignments/${postAssignment.data.id}/submission/files`,
+            {
+              fileName: 'smoke-submission.txt',
+              mimeType: 'text/plain',
+              contentBase64: 'c21va2Ugc3VibWlzc2lvbg==',
+            },
+            { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
+          );
+          if (uploadSubmissionFile.status !== 201 || !uploadSubmissionFile.data?.files?.length) {
+            console.error('FAIL: student submission file upload', uploadSubmissionFile.status, uploadSubmissionFile.data);
+            failed++;
+          } else {
+            const teacherSubmissions = await request(
+              'GET',
+              `/api/teacher/assignments/${postAssignment.data.id}/submissions`,
+              null,
+              { 'x-user-email': 'john_smith@milton.edu', 'x-user-name': 'John Smith' }
+            );
+            const hasStudentSubmission = teacherSubmissions.status === 200
+              && Array.isArray(teacherSubmissions.data?.submissions)
+              && teacherSubmissions.data.submissions.some((s) => s.studentEmail === 'lucas_chan26@milton.edu');
+            if (!hasStudentSubmission) {
+              console.error('FAIL: teacher assignment submissions view', teacherSubmissions.status, teacherSubmissions.data);
+              failed++;
+            } else {
+              console.log('PASS: assignment submission workflow');
+            }
+          }
+        }
+
         const notifications = await request(
           'GET',
           '/api/notifications?limit=20',
           null,
-          { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+          { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
         );
         const hasAssignmentNotification = notifications.status === 200
           && Array.isArray(notifications.data)
@@ -233,7 +329,7 @@ async function run() {
         'POST',
         `/api/student/courses/${createCourse.data.id}/feedback`,
         { rating: 4, comment: 'Good pace in class.' },
-        { 'x-user-email': 'lucas12@milton.edu', 'x-user-name': 'Lucas' }
+        { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas' }
       );
       if (submitFeedback.status !== 201) {
         console.error('FAIL: submit feedback', submitFeedback.status, submitFeedback.data);
@@ -243,7 +339,7 @@ async function run() {
           'GET',
           `/api/teacher/courses/${createCourse.data.id}/feedback`,
           null,
-          { 'x-user-email': 'hales@milton.edu', 'x-user-name': 'Mr. Hales' }
+          { 'x-user-email': 'john_smith@milton.edu', 'x-user-name': 'John Smith' }
         );
         const feedbackOk = feedbackSummary.status === 200
           && feedbackSummary.data?.totalResponses >= 1

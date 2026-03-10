@@ -27,12 +27,12 @@ function removeDbSet(basePath) {
 }
 
 function main() {
-  const includeTest = process.argv.includes('--include-test');
+  const includeStudent = process.argv.includes('--include-test');
   const appDbPath = resolveAppDbPath();
   const removedApp = removeDbSet(appDbPath);
 
   const removed = [...removedApp];
-  if (includeTest) {
+  if (includeStudent) {
     const testDbPath = path.resolve(process.cwd(), 'data', 'test.db');
     removed.push(...removeDbSet(testDbPath));
   }
@@ -40,8 +40,8 @@ function main() {
   console.log('[db:reset] Reset complete');
   console.log(`[db:reset] App DB: ${appDbPath}`);
   console.log(`[db:reset] Removed files: ${removed.length > 0 ? removed.join(', ') : '(none found)'}`);
-  if (!includeTest) {
-    console.log('[db:reset] Test DB files were not removed. Pass --include-test to remove test.db variants.');
+  if (!includeStudent) {
+    console.log('[db:reset] Student DB files were not removed. Pass --include-test to remove test.db variants.');
   }
 }
 

@@ -60,7 +60,7 @@ export function LoginPage() {
           <div className="auth-header">
             <span className="status-chip status-claimed auth-mode-badge">Mock Auth</span>
             <h1 className="page-title">Sign in</h1>
-            <p className="page-subtitle">Test mode is active for local and E2E flows.</p>
+            <p className="page-subtitle">Student mode is active for local and E2E flows.</p>
           </div>
           <p className="auth-subcopy">
             Use the Dev Identity page (<code>/dev</code>) to set identity. Google login is not required.
@@ -115,7 +115,7 @@ export function LoginPage() {
         {isDevMode ? (
           <div className="auth-actions">
             <Link to="/dev" className="ui-btn btn-primary btn-lg">
-              {profile?.email ? 'Switch Dev Identity' : 'Open Dev Identity'}
+              {profile?.email ? 'Switch Dev Identity' : 'Sign in (Dev Identity)'}
             </Link>
             {profile?.email && (
               <Link to="/" className="ui-btn btn-secondary">
@@ -124,12 +124,16 @@ export function LoginPage() {
             )}
           </div>
         ) : (
-          <Button type="button" onClick={handleGoogleLogin} className="btn-primary-large btn-full">
-            Sign in with Google
-          </Button>
+          <div className="auth-actions">
+            <Button type="button" variant="secondary" onClick={handleGoogleLogin}>
+              Sign in
+            </Button>
+            <Button type="button" onClick={handleGoogleLogin} className="btn-primary-large">
+              Sign in with Google
+            </Button>
+          </div>
         )}
       </Card>
     </div>
   );
 }
-

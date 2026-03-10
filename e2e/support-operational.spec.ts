@@ -120,20 +120,20 @@ test.describe('Support hub operational', () => {
     const blockedClaim = await request.post(`/api/requests/${requestId}/claim`, {
       headers: {
         'content-type': 'application/json',
-        'x-user-email': 'test34@milton.edu',
-        'x-user-name': 'Test Student',
+        'x-user-email': 'jane_doe27@milton.edu',
+        'x-user-name': 'Jane Doe',
       },
-      data: { claimedBy: 'Test Student' },
+      data: { claimedBy: 'Jane Doe' },
     });
     expect(blockedClaim.status()).toBe(403);
 
     const teacherClaim = await request.post(`/api/requests/${requestId}/claim`, {
       headers: {
         'content-type': 'application/json',
-        'x-user-email': 'hales@milton.edu',
-        'x-user-name': 'Mr. Hales',
+        'x-user-email': 'john_smith@milton.edu',
+        'x-user-name': 'John Smith',
       },
-      data: { claimedBy: 'Mr. Hales' },
+      data: { claimedBy: 'John Smith' },
     });
     expect(teacherClaim.ok()).toBeTruthy();
   });

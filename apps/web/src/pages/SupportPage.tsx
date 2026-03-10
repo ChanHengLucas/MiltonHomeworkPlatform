@@ -36,7 +36,10 @@ export function SupportPage() {
     meetingLocation: '',
     meetingLink: '',
     proposedTimes: '',
+    resourceLink: '',
+    resourceNote: '',
   });
+  const [createResourceFile, setCreateResourceFile] = useState<File | null>(null);
   const [filterSubject, setFilterSubject] = useState('');
   const [filterUrgency, setFilterUrgency] = useState('');
   const [filterStatus, setFilterStatus] = useState<'open' | 'claimed' | 'closed' | ''>('open');
@@ -95,7 +98,7 @@ export function SupportPage() {
     }
     try {
       setError(null);
-      await api.createRequest({
+      const created = await api.createRequest({
         ...createForm,
         linkedAssignmentId: prefilledLinkedId || undefined,
         meetingAbout: createForm.meetingAbout.trim() || null,
@@ -103,6 +106,33 @@ export function SupportPage() {
         meetingLink: createForm.meetingLink.trim() || null,
         proposedTimes: createForm.proposedTimes.trim() || null,
       });
+      if (createForm.resourceLink.trim()) {
+        await api.addRequestResourceLink(created.id, {
+          url: createForm.resourceLink.trim(),
+          note: createForm.resourceNote.trim() || null,
+        });
+      }
+      if (createResourceFile) {
+        const contentBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('Failed to read upload file'));
+          reader.onload = () => {
+            if (typeof reader.result !== 'string') {
+              reject(new Error('Failed to process upload file'));
+              return;
+            }
+            const base64 = reader.result.includes(',') ? reader.result.split(',')[1] : reader.result;
+            resolve(base64);
+          };
+          reader.readAsDataURL(createResourceFile);
+        });
+        await api.uploadRequestResourceFile(created.id, {
+          fileName: createResourceFile.name,
+          mimeType: createResourceFile.type || null,
+          contentBase64,
+          note: createForm.resourceNote.trim() || null,
+        });
+      }
       setCreateForm({
         title: '',
         description: '',
@@ -113,7 +143,10 @@ export function SupportPage() {
         meetingLocation: '',
         meetingLink: '',
         proposedTimes: '',
+        resourceLink: '',
+        resourceNote: '',
       });
+      setCreateResourceFile(null);
       console.log('[Planner][API] Created support request');
       load();
       navigate('/support');
@@ -221,6 +254,38 @@ export function SupportPage() {
               onChange={(e) => setCreateForm((f) => ({ ...f, proposedTimes: e.target.value }))}
               placeholder="Mon 4:00-4:30 PM, Tue lunch, Wed after school"
               style={{ minHeight: 80 }}
+            />
+          </div>
+          <div className="form-group form-group-wide">
+            <label>Reference link (optional)</label>
+            <input
+              className="ui-input"
+              value={createForm.resourceLink}
+              onChange={(e) => setCreateForm((f) => ({ ...f, resourceLink: e.target.value }))}
+              placeholder="https://docs.google.com/... or class page link"
+            />
+          </div>
+          <div className="form-group form-group-wide">
+            <label>Upload file (optional)</label>
+            <input
+              type="file"
+              className="ui-input"
+              onChange={(e) => setCreateResourceFile(e.target.files?.[0] ?? null)}
+            />
+            {createResourceFile && (
+              <small className="form-hint">
+                Selected: {createResourceFile.name} ({Math.round(createResourceFile.size / 1024)} KB)
+              </small>
+            )}
+          </div>
+          <div className="form-group form-group-wide">
+            <label>Attachment note (optional)</label>
+            <textarea
+              className="ui-textarea"
+              value={createForm.resourceNote}
+              onChange={(e) => setCreateForm((f) => ({ ...f, resourceNote: e.target.value }))}
+              placeholder="What should helpers know about the file or link?"
+              style={{ minHeight: 60 }}
             />
           </div>
         </div>

@@ -34,14 +34,25 @@ test.describe('Support hub flow', () => {
     await expect(page).toHaveURL(/\/support\/[a-f0-9-]+/);
     await expect(page.getByRole('heading', { level: 2, name: 'Need help?' })).toBeVisible();
     await expect(page.getByText('I need help with this assignment.')).toBeVisible();
+    await page.getByPlaceholder('https://...').fill('https://example.com/support-notes');
+    await page.getByPlaceholder('Context for this attachment').fill('Reference worksheet');
+    await page.click('button:has-text("Add link")');
+    await expect(page.getByRole('link', { name: 'Open link' }).first()).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'support-proof.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('support attachment'),
+    });
+    await page.click('button:has-text("Upload file")');
+    await expect(page.getByText('support-proof.txt').first()).toBeVisible();
 
     // Switch to Student B and claim
     await setDevIdentity(page, 'student-b');
-    await page.fill('input[placeholder="Your name"]', 'Test Student');
+    await page.fill('input[placeholder="Your name"]', 'Jane Doe');
     await page.click('button:has-text("Claim request")');
 
-    // Verify claimed by Student B (display name Test Student)
-    await expect(page.getByText('Claimed by: Test Student').first()).toBeVisible();
+    // Verify claimed by Student B (display name Jane Doe)
+    await expect(page.getByText('Claimed by: Jane Doe').first()).toBeVisible();
 
     // Add comment as Student B - verify helper label (no role picker; server derives)
     await page.fill('textarea[placeholder*="message"]', 'I can help with this!');

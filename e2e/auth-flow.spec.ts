@@ -36,7 +36,7 @@ test.describe('Auth flow', () => {
   test('dev identity mode hides Google login and marks identity clearly', async ({ page }) => {
     await page.goto('/login');
     await page.evaluate(() => {
-      localStorage.setItem('planner_school_email', 'lucas12@milton.edu');
+      localStorage.setItem('planner_school_email', 'lucas_chan26@milton.edu');
       localStorage.setItem('planner_display_name', 'Lucas Chan');
     });
     await page.reload();

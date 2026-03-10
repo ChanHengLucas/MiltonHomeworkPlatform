@@ -2,17 +2,23 @@ import { Router, Request } from 'express';
 import { z } from 'zod';
 import {
   addCourseMember,
+  addAssignmentSubmissionFile,
+  getAssignmentSubmissionByStudent,
+  getCourseAssignment,
   getCourse,
   getCourseByCode,
   getCourseFeedbackByStudent,
   isStudentInCourse,
+  listAssignmentSubmissionsByStudent,
   listCourseAnnouncementsByCourse,
   listCourseAssignmentsByCourse,
   listCourseAssignmentsForStudent,
   listCoursesByStudent,
+  upsertAssignmentSubmission,
   upsertCourseFeedback,
 } from '@planner/db';
 import { requireAuth } from '../middleware/identity';
+import { saveBase64Upload } from '../utils/uploads';
 
 export const studentRouter = Router();
 
@@ -27,9 +33,112 @@ const feedbackSchema = z.object({
   comment: z.string().max(1000).optional().nullable(),
 });
 
+const submissionSchema = z.object({
+  comment: z.string().max(4000).optional().nullable(),
+  links: z.array(z.string().url('Submission links must be valid URLs')).max(8).optional(),
+});
+
+const submissionFileUploadSchema = z.object({
+  fileName: z.string().min(1, 'File name is required').max(240),
+  mimeType: z.string().max(120).optional().nullable(),
+  contentBase64: z.string().min(1, 'File content is required'),
+});
+
+function httpError(message: string, statusCode: number): Error & { statusCode?: number } {
+  const err = new Error(message) as Error & { statusCode?: number };
+  err.statusCode = statusCode;
+  return err;
+}
+
+function requireStudentAssignmentAccess(assignmentId: string, studentEmail: string): void {
+  const assignment = getCourseAssignment(assignmentId);
+  if (!assignment) {
+    throw httpError('Assignment not found', 404);
+  }
+  const course = getCourse(assignment.courseId);
+  if (!course || !isStudentInCourse(course.id, studentEmail)) {
+    throw httpError('You are not enrolled in this assignment course', 403);
+  }
+}
+
 studentRouter.get('/assignments', (req: Request, res) => {
   const assignments = listCourseAssignmentsForStudent(req.user!.email);
   res.json(assignments);
+});
+
+studentRouter.get('/assignments/submissions', (req: Request, res) => {
+  const assignments = listCourseAssignmentsForStudent(req.user!.email);
+  const visibleAssignmentIds = new Set(assignments.map((assignment) => assignment.id));
+  const submissions = listAssignmentSubmissionsByStudent(req.user!.email)
+    .filter((submission) => visibleAssignmentIds.has(submission.assignmentId));
+  res.json(submissions);
+});
+
+studentRouter.get('/assignments/:assignmentId/submission', (req: Request, res, next) => {
+  try {
+    requireStudentAssignmentAccess(req.params.assignmentId, req.user!.email);
+    const submission = getAssignmentSubmissionByStudent(req.params.assignmentId, req.user!.email);
+    res.json(submission);
+  } catch (err) {
+    next(err);
+  }
+});
+
+studentRouter.put('/assignments/:assignmentId/submission', (req: Request, res, next) => {
+  try {
+    requireStudentAssignmentAccess(req.params.assignmentId, req.user!.email);
+    const parsed = submissionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return next(httpError(parsed.error.errors.map((e) => e.message).join('; '), 400));
+    }
+
+    const submission = upsertAssignmentSubmission({
+      assignmentId: req.params.assignmentId,
+      studentEmail: req.user!.email,
+      comment: parsed.data.comment ?? null,
+      links: parsed.data.links ?? [],
+    });
+    res.json(submission);
+  } catch (err) {
+    next(err);
+  }
+});
+
+studentRouter.post('/assignments/:assignmentId/submission/files', (req: Request, res, next) => {
+  try {
+    requireStudentAssignmentAccess(req.params.assignmentId, req.user!.email);
+    const parsed = submissionFileUploadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return next(httpError(parsed.error.errors.map((e) => e.message).join('; '), 400));
+    }
+
+    const submission = getAssignmentSubmissionByStudent(req.params.assignmentId, req.user!.email)
+      ?? upsertAssignmentSubmission({
+        assignmentId: req.params.assignmentId,
+        studentEmail: req.user!.email,
+        comment: null,
+        links: [],
+      });
+
+    const saved = saveBase64Upload('assignment-submissions', {
+      fileName: parsed.data.fileName,
+      mimeType: parsed.data.mimeType ?? null,
+      contentBase64: parsed.data.contentBase64,
+    });
+
+    addAssignmentSubmissionFile({
+      submissionId: submission.id,
+      originalName: saved.originalName,
+      storedPath: saved.storedPath,
+      mimeType: saved.mimeType ?? null,
+      sizeBytes: saved.sizeBytes,
+    });
+
+    const updated = getAssignmentSubmissionByStudent(req.params.assignmentId, req.user!.email);
+    res.status(201).json(updated);
+  } catch (err) {
+    next(err);
+  }
 });
 
 studentRouter.get('/courses', (req: Request, res) => {

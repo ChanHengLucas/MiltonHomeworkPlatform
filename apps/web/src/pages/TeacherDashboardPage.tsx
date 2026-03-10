@@ -1,21 +1,29 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type CourseAssignment, type GradingTask } from '../api';
+import {
+  api,
+  type AssignmentSubmission,
+  type CourseAssignment,
+  type GradingTask,
+  type PlannerCourse,
+} from '../api';
 import { useAppState } from '../context/AppContext';
 import { Button, Card, Callout } from '../components/ui';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { fromDateTimeLocalValue, formatDueDate, toDateTimeLocalValue } from '../utils/datetime';
 
-interface Course {
-  id: string;
-  name: string;
-  teacherEmail: string;
-  createdAt: string;
-}
-
 interface PublishForm {
   courseId: string;
   title: string;
+  description: string;
+  dueAt: string;
+  estMinutes: string;
+  type: string;
+}
+
+interface EditAssignmentForm {
+  title: string;
+  description: string;
   dueAt: string;
   estMinutes: string;
   type: string;
@@ -32,18 +40,33 @@ function defaultPublishForm(courseId: string): PublishForm {
   return {
     courseId,
     title: '',
+    description: '',
     dueAt: defaultDueAtLocal(),
     estMinutes: '45',
     type: 'homework',
   };
 }
 
+function defaultEditAssignmentForm(assignment: CourseAssignment): EditAssignmentForm {
+  return {
+    title: assignment.title,
+    description: assignment.description ?? '',
+    dueAt: assignment.dueAtMs ? toDateTimeLocalValue(assignment.dueAtMs) : '',
+    estMinutes: String(assignment.estMinutes),
+    type: assignment.type || 'homework',
+  };
+}
+
 export function TeacherDashboardPage() {
   const { teacherEligible } = useAppState();
   const { isSignedIn } = useAuthGate();
-  const [courses, setCourses] = useState<Course[]>([]);
+  const [courses, setCourses] = useState<PlannerCourse[]>([]);
   const [courseMembers, setCourseMembers] = useState<Record<string, string[]>>({});
   const [courseAssignments, setCourseAssignments] = useState<Record<string, CourseAssignment[]>>({});
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState<Record<string, AssignmentSubmission[]>>({});
+  const [activeSubmissionAssignmentId, setActiveSubmissionAssignmentId] = useState<string | null>(null);
+  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+  const [editAssignmentForms, setEditAssignmentForms] = useState<Record<string, EditAssignmentForm>>({});
   const [gradingTasks, setGradingTasks] = useState<GradingTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +84,9 @@ export function TeacherDashboardPage() {
       setCourses([]);
       setCourseAssignments({});
       setCourseMembers({});
+      setAssignmentSubmissions({});
+      setActiveSubmissionAssignmentId(null);
+      setEditingAssignmentId(null);
       setGradingTasks([]);
       setError(null);
       return;
@@ -86,6 +112,9 @@ export function TeacherDashboardPage() {
         }
         return next;
       });
+      setActiveSubmissionAssignmentId(null);
+      setEditingAssignmentId(null);
+      setAssignmentSubmissions({});
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load';
       setError(msg);
@@ -108,6 +137,17 @@ export function TeacherDashboardPage() {
           map[course.id] = lists[i] ?? [];
         });
         setCourseAssignments(map);
+        setEditAssignmentForms((prev) => {
+          const next = { ...prev };
+          Object.values(map).forEach((items) => {
+            items.forEach((assignment) => {
+              if (!next[assignment.id]) {
+                next[assignment.id] = defaultEditAssignmentForm(assignment);
+              }
+            });
+          });
+          return next;
+        });
       })
       .catch(() => {
         setCourseAssignments({});
@@ -183,6 +223,7 @@ export function TeacherDashboardPage() {
       await api.createTeacherAssignment({
         courseId,
         title: form.title.trim(),
+        description: form.description.trim() || null,
         dueAtMs,
         estMinutes: est,
         type: form.type || 'homework',
@@ -191,6 +232,53 @@ export function TeacherDashboardPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to publish');
+    }
+  }
+
+  async function handleSaveAssignmentEdit(assignmentId: string) {
+    if (!isSignedIn) return;
+    const form = editAssignmentForms[assignmentId];
+    if (!form) return;
+    if (!form.title.trim()) {
+      setError('Assignment title is required.');
+      return;
+    }
+    const est = parseInt(form.estMinutes, 10);
+    if (Number.isNaN(est) || est < 5) {
+      setError('Estimated minutes must be at least 5.');
+      return;
+    }
+    try {
+      setError(null);
+      const dueAtRaw = fromDateTimeLocalValue(form.dueAt);
+      const dueAtMs = Number.isFinite(dueAtRaw) && dueAtRaw > 0 ? dueAtRaw : null;
+      await api.updateTeacherAssignment(assignmentId, {
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        dueAtMs,
+        estMinutes: est,
+        type: form.type || 'homework',
+      });
+      setEditingAssignmentId(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update assignment');
+    }
+  }
+
+  async function handleToggleSubmissions(assignmentId: string) {
+    if (!isSignedIn) return;
+    if (activeSubmissionAssignmentId === assignmentId) {
+      setActiveSubmissionAssignmentId(null);
+      return;
+    }
+    try {
+      setError(null);
+      const result = await api.listTeacherAssignmentSubmissions(assignmentId);
+      setAssignmentSubmissions((prev) => ({ ...prev, [assignmentId]: result.submissions }));
+      setActiveSubmissionAssignmentId(assignmentId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load submissions');
     }
   }
 
@@ -286,7 +374,9 @@ export function TeacherDashboardPage() {
                 <div key={course.id} className="teacher-course-card">
                   <div className="split-header">
                     <h3 style={{ margin: 0, fontSize: '1rem' }}>{course.name}</h3>
-                    <span className="form-hint">{courseMembers[course.id]?.length ?? 0} students invited</span>
+                    <span className="form-hint">
+                      Code: <strong>{course.courseCode}</strong> · {courseMembers[course.id]?.length ?? 0} students
+                    </span>
                   </div>
                   <div className="two-column" style={{ marginTop: '0.75rem' }}>
                     <div>
@@ -323,6 +413,21 @@ export function TeacherDashboardPage() {
                                 [course.id]: { ...(prev[course.id] ?? defaultPublishForm(course.id)), title: e.target.value },
                               }))
                             }
+                          />
+                        </div>
+                        <div className="form-group form-group-wide">
+                          <label>Description (optional)</label>
+                          <textarea
+                            className="ui-textarea"
+                            placeholder="Assignment details and submission instructions"
+                            value={assignForm[course.id]?.description ?? ''}
+                            onChange={(e) =>
+                              setAssignForm((prev) => ({
+                                ...prev,
+                                [course.id]: { ...(prev[course.id] ?? defaultPublishForm(course.id)), description: e.target.value },
+                              }))
+                            }
+                            style={{ minHeight: 72 }}
                           />
                         </div>
                         <div className="form-group">
@@ -380,10 +485,189 @@ export function TeacherDashboardPage() {
                       </Button>
                     </div>
                   </div>
-                  {(courseAssignments[course.id]?.length ?? 0) > 0 && (
-                    <p className="form-hint" style={{ marginTop: '0.75rem' }}>
-                      Published: {courseAssignments[course.id].slice(0, 5).map((assignment) => assignment.title).join(', ')}
-                    </p>
+                  {(courseAssignments[course.id]?.length ?? 0) > 0 ? (
+                    <div style={{ marginTop: '0.9rem' }}>
+                      <h4 style={{ margin: '0 0 0.45rem 0', fontSize: '0.95rem' }}>Published assignments</h4>
+                      <div className="assignment-list">
+                        {courseAssignments[course.id].map((assignment) => {
+                          const isEditing = editingAssignmentId === assignment.id;
+                          const editForm = editAssignmentForms[assignment.id] ?? defaultEditAssignmentForm(assignment);
+                          const submissions = assignmentSubmissions[assignment.id] ?? [];
+                          const showingSubmissions = activeSubmissionAssignmentId === assignment.id;
+
+                          return (
+                            <div key={assignment.id} className="assignment-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                              <div className="split-header">
+                                <div className="assignment-card-title">{assignment.title}</div>
+                                <span className="assignment-card-meta">
+                                  {assignment.estMinutes} min
+                                  {assignment.dueAtMs ? ` · Due ${formatDueDate(assignment.dueAtMs)}` : ' · No due date'}
+                                </span>
+                              </div>
+                              {assignment.description && (
+                                <p className="form-hint" style={{ margin: '0.35rem 0 0 0' }}>
+                                  {assignment.description}
+                                </p>
+                              )}
+                              <div className="assignment-card-actions" style={{ marginTop: '0.6rem' }}>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingAssignmentId((prev) => (prev === assignment.id ? null : assignment.id));
+                                    setEditAssignmentForms((prev) => ({
+                                      ...prev,
+                                      [assignment.id]: prev[assignment.id] ?? defaultEditAssignmentForm(assignment),
+                                    }));
+                                  }}
+                                >
+                                  {isEditing ? 'Cancel edit' : 'Edit details'}
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => handleToggleSubmissions(assignment.id)}
+                                >
+                                  {showingSubmissions ? 'Hide submissions' : 'View submissions'}
+                                </Button>
+                              </div>
+                              {isEditing && (
+                                <div style={{ marginTop: '0.8rem', borderTop: '1px solid var(--color-border)', paddingTop: '0.8rem' }}>
+                                  <div className="form-grid">
+                                    <div className="form-group">
+                                      <label>Title</label>
+                                      <input
+                                        className="ui-input"
+                                        value={editForm.title}
+                                        onChange={(e) =>
+                                          setEditAssignmentForms((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: { ...editForm, title: e.target.value },
+                                          }))
+                                        }
+                                      />
+                                    </div>
+                                    <div className="form-group">
+                                      <label>Due</label>
+                                      <input
+                                        type="datetime-local"
+                                        className="ui-input"
+                                        value={editForm.dueAt}
+                                        onChange={(e) =>
+                                          setEditAssignmentForms((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: { ...editForm, dueAt: e.target.value },
+                                          }))
+                                        }
+                                      />
+                                    </div>
+                                    <div className="form-group">
+                                      <label>Estimate (min)</label>
+                                      <input
+                                        type="number"
+                                        min={5}
+                                        className="ui-input"
+                                        value={editForm.estMinutes}
+                                        onChange={(e) =>
+                                          setEditAssignmentForms((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: { ...editForm, estMinutes: e.target.value },
+                                          }))
+                                        }
+                                      />
+                                    </div>
+                                    <div className="form-group">
+                                      <label>Type</label>
+                                      <select
+                                        className="ui-select"
+                                        value={editForm.type}
+                                        onChange={(e) =>
+                                          setEditAssignmentForms((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: { ...editForm, type: e.target.value },
+                                          }))
+                                        }
+                                      >
+                                        <option value="homework">Homework</option>
+                                        <option value="quiz">Quiz</option>
+                                        <option value="test">Test</option>
+                                        <option value="project">Project</option>
+                                        <option value="reading">Reading</option>
+                                        <option value="other">Other</option>
+                                      </select>
+                                    </div>
+                                    <div className="form-group form-group-wide">
+                                      <label>Description</label>
+                                      <textarea
+                                        className="ui-textarea"
+                                        value={editForm.description}
+                                        onChange={(e) =>
+                                          setEditAssignmentForms((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: { ...editForm, description: e.target.value },
+                                          }))
+                                        }
+                                        style={{ minHeight: 72 }}
+                                      />
+                                    </div>
+                                  </div>
+                                  <Button size="sm" onClick={() => handleSaveAssignmentEdit(assignment.id)}>
+                                    Save assignment
+                                  </Button>
+                                </div>
+                              )}
+                              {showingSubmissions && (
+                                <div style={{ marginTop: '0.8rem', borderTop: '1px solid var(--color-border)', paddingTop: '0.8rem' }}>
+                                  {submissions.length === 0 ? (
+                                    <p className="empty-state">No student submissions yet.</p>
+                                  ) : (
+                                    <div className="assignment-list">
+                                      {submissions.map((submission) => (
+                                        <div key={submission.id} className="request-card">
+                                          <div className="request-card-title">{submission.studentEmail}</div>
+                                          <div className="request-card-meta">
+                                            Updated {new Date(submission.updatedAt).toLocaleString()}
+                                          </div>
+                                          {submission.comment && (
+                                            <p style={{ margin: '0.45rem 0', whiteSpace: 'pre-wrap' }}>{submission.comment}</p>
+                                          )}
+                                          {submission.links.length > 0 && (
+                                            <div style={{ marginTop: '0.25rem' }}>
+                                              <p className="form-hint" style={{ margin: '0 0 0.25rem 0' }}>Links</p>
+                                              <ul style={{ margin: 0, paddingLeft: '1rem' }}>
+                                                {submission.links.map((link) => (
+                                                  <li key={link}>
+                                                    <a className="link" href={link} target="_blank" rel="noreferrer">{link}</a>
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            </div>
+                                          )}
+                                          {submission.files.length > 0 && (
+                                            <div style={{ marginTop: '0.35rem' }}>
+                                              <p className="form-hint" style={{ margin: '0 0 0.25rem 0' }}>Files</p>
+                                              <ul style={{ margin: 0, paddingLeft: '1rem' }}>
+                                                {submission.files.map((file) => (
+                                                  <li key={file.id} className="form-hint">
+                                                    {file.originalName} ({Math.round(file.sizeBytes / 1024)} KB)
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="empty-state" style={{ marginTop: '0.75rem' }}>No assignments published yet.</p>
                   )}
                 </div>
               ))}
