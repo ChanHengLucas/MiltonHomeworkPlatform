@@ -11,7 +11,7 @@ const blocklistBodySchema = zod_1.z.object({
     blockedEmail: zod_1.z.string().email(),
     blockedUntil: zod_1.z.string().min(1), // ISO date
 });
-exports.adminRouter.post('/cleanup-closed', (req, res) => {
+exports.adminRouter.post('/cleanup-closed', identity_1.requireTeacher, (req, res) => {
     const isProd = process.env.NODE_ENV === 'production';
     const token = process.env.ADMIN_CLEANUP_TOKEN;
     if (isProd && !token) {

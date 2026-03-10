@@ -16,7 +16,7 @@ const blocklistBodySchema = z.object({
   blockedUntil: z.string().min(1), // ISO date
 });
 
-adminRouter.post('/cleanup-closed', (req: Request, res: Response) => {
+adminRouter.post('/cleanup-closed', requireTeacher, (req: Request, res: Response) => {
   const isProd = process.env.NODE_ENV === 'production';
   const token = process.env.ADMIN_CLEANUP_TOKEN;
   if (isProd && !token) {

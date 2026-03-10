@@ -26,6 +26,7 @@ import {
 } from '@planner/db';
 import { isTeacherEligible } from '../utils/identity';
 import { saveBase64Upload } from '../utils/uploads';
+import { requireAuth } from '../middleware/identity';
 
 const MAX_ACTIVE_CLAIMS = parseInt(process.env.MAX_ACTIVE_CLAIMS ?? '2', 10) || 2;
 const MAX_CLAIMS_PER_HOUR = parseInt(process.env.MAX_CLAIMS_PER_HOUR ?? '5', 10) || 5;
@@ -137,6 +138,8 @@ function canUserModifyRequest(req: HelpRequest, userEmail: string): boolean {
 }
 
 export const requestsRouter = Router();
+
+requestsRouter.use(requireAuth);
 
 requestsRouter.get('/', (req, res) => {
   const identity = getIdentity(req);

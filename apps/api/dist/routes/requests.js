@@ -6,6 +6,8 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const db_1 = require("@planner/db");
 const identity_1 = require("../utils/identity");
+const uploads_1 = require("../utils/uploads");
+const identity_2 = require("../middleware/identity");
 const MAX_ACTIVE_CLAIMS = parseInt(process.env.MAX_ACTIVE_CLAIMS ?? '2', 10) || 2;
 const MAX_CLAIMS_PER_HOUR = parseInt(process.env.MAX_CLAIMS_PER_HOUR ?? '5', 10) || 5;
 const createBodySchema = zod_1.z.object({
@@ -29,6 +31,18 @@ const commentBodySchema = zod_1.z.object({
 const reportBodySchema = zod_1.z.object({
     reason: zod_1.z.enum(['spam', 'trolling', 'no_show', 'other']),
     details: zod_1.z.string().optional(),
+});
+const resourceLinkBodySchema = zod_1.z.object({
+    url: zod_1.z.string().url('Link must be a valid URL'),
+    label: zod_1.z.string().max(120).optional().nullable(),
+    note: zod_1.z.string().max(1000).optional().nullable(),
+});
+const resourceFileBodySchema = zod_1.z.object({
+    fileName: zod_1.z.string().min(1, 'File name is required').max(240),
+    mimeType: zod_1.z.string().max(120).optional().nullable(),
+    contentBase64: zod_1.z.string().min(1, 'File content is required'),
+    label: zod_1.z.string().max(120).optional().nullable(),
+    note: zod_1.z.string().max(1000).optional().nullable(),
 });
 function getIdentity(req) {
     const email = (req.user?.email || '').trim();
@@ -79,7 +93,19 @@ function canUserSeeRequest(req, userEmail) {
     }
     return false;
 }
+function canUserModifyRequest(req, userEmail) {
+    const normalized = userEmail.toLowerCase().trim();
+    if (!normalized)
+        return false;
+    const creator = (req.createdByEmail || '').toLowerCase().trim();
+    const claimer = (req.claimedByEmail || '').toLowerCase().trim();
+    const isTeacher = (0, identity_1.isTeacherEligible)(normalized);
+    return Boolean((creator && normalized === creator)
+        || (claimer && normalized === claimer)
+        || isTeacher);
+}
 exports.requestsRouter = (0, express_1.Router)();
+exports.requestsRouter.use(identity_2.requireAuth);
 exports.requestsRouter.get('/', (req, res) => {
     const identity = getIdentity(req);
     const userEmail = (identity.email || '').toLowerCase().trim();
@@ -307,6 +333,85 @@ exports.requestsRouter.get('/:id/comments', (req, res, next) => {
     }
     const comments = (0, db_1.listCommentsForRequest)(req.params.id);
     res.json(comments);
+});
+exports.requestsRouter.get('/:id/resources', (req, res, next) => {
+    const identity = getIdentity(req);
+    const userEmail = (identity.email || '').toLowerCase().trim();
+    const request = (0, db_1.getHelpRequestById)(req.params.id);
+    if (!request) {
+        const err = new Error('Request not found');
+        err.statusCode = 404;
+        return next(err);
+    }
+    if (!canUserSeeRequest(request, userEmail)) {
+        return res.status(403).json({ error: 'This request is not available to you.' });
+    }
+    const resources = (0, db_1.listHelpRequestResources)(req.params.id);
+    res.json(resources);
+});
+exports.requestsRouter.post('/:id/resources/link', (req, res, next) => {
+    const parsed = resourceLinkBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+        const err = new Error(parsed.error.errors.map((e) => e.message).join('; '));
+        err.statusCode = 400;
+        return next(err);
+    }
+    const identity = getIdentity(req);
+    const userEmail = (identity.email || '').toLowerCase().trim();
+    const request = (0, db_1.getHelpRequestById)(req.params.id);
+    if (!request) {
+        const err = new Error('Request not found');
+        err.statusCode = 404;
+        return next(err);
+    }
+    if (!canUserModifyRequest(request, userEmail)) {
+        return res.status(403).json({ error: 'Only request participants can add resources.' });
+    }
+    const resource = (0, db_1.addHelpRequestResource)({
+        requestId: request.id,
+        kind: 'link',
+        label: parsed.data.label ?? null,
+        url: parsed.data.url,
+        note: parsed.data.note ?? null,
+        createdByEmail: userEmail || null,
+    });
+    res.status(201).json(resource);
+});
+exports.requestsRouter.post('/:id/resources/file', (req, res, next) => {
+    const parsed = resourceFileBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+        const err = new Error(parsed.error.errors.map((e) => e.message).join('; '));
+        err.statusCode = 400;
+        return next(err);
+    }
+    const identity = getIdentity(req);
+    const userEmail = (identity.email || '').toLowerCase().trim();
+    const request = (0, db_1.getHelpRequestById)(req.params.id);
+    if (!request) {
+        const err = new Error('Request not found');
+        err.statusCode = 404;
+        return next(err);
+    }
+    if (!canUserModifyRequest(request, userEmail)) {
+        return res.status(403).json({ error: 'Only request participants can add resources.' });
+    }
+    const saved = (0, uploads_1.saveBase64Upload)('support-resources', {
+        fileName: parsed.data.fileName,
+        mimeType: parsed.data.mimeType ?? null,
+        contentBase64: parsed.data.contentBase64,
+    });
+    const resource = (0, db_1.addHelpRequestResource)({
+        requestId: request.id,
+        kind: 'file',
+        label: parsed.data.label ?? null,
+        note: parsed.data.note ?? null,
+        originalName: saved.originalName,
+        storedPath: saved.storedPath,
+        mimeType: saved.mimeType ?? null,
+        sizeBytes: saved.sizeBytes,
+        createdByEmail: userEmail || null,
+    });
+    res.status(201).json(resource);
 });
 exports.requestsRouter.post('/:id/comments', (req, res, next) => {
     const parsed = commentBodySchema.safeParse(req.body);

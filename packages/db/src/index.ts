@@ -113,12 +113,14 @@ interface AssignmentRow {
   type: string;
   completed: number;
   optional?: number;
+  userEmail?: string | null;
 }
 
 interface AvailabilityRow {
   id: string;
   startMin: number;
   endMin: number;
+  userEmail?: string | null;
 }
 
 interface HelpRequestRow {
@@ -667,6 +669,7 @@ const MIGRATIONS: Migration[] = [
   {
     id: '017_submissions_and_request_resources',
     up: `
+
       CREATE TABLE IF NOT EXISTS assignment_submissions (
         id TEXT PRIMARY KEY,
         assignmentId TEXT NOT NULL,
@@ -709,6 +712,16 @@ const MIGRATIONS: Migration[] = [
         FOREIGN KEY (requestId) REFERENCES help_requests(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_help_request_resources_request ON help_request_resources(requestId, createdAt ASC);
+    `
+  },
+  {
+    id: '018_per_user_assignments_availability',
+    up: `
+      ALTER TABLE assignments ADD COLUMN userEmail TEXT;
+      CREATE INDEX IF NOT EXISTS idx_assignments_userEmail ON assignments(userEmail);
+
+      ALTER TABLE availability_blocks ADD COLUMN userEmail TEXT;
+      CREATE INDEX IF NOT EXISTS idx_availability_blocks_userEmail ON availability_blocks(userEmail);
     `
   }
 ];
@@ -800,11 +813,12 @@ export function runDbHealthCheck(): DbHealthCheckResult {
 
 // Assignment repository
 
-export function listAssignments(): Assignment[] {
+export function listAssignments(userEmail: string): Assignment[] {
   const db = getDb();
+  const email = normalizeEmail(userEmail);
   const rows = db
-    .prepare('SELECT * FROM assignments ORDER BY dueAt IS NULL, dueAt ASC, title ASC')
-    .all() as AssignmentRow[];
+    .prepare('SELECT * FROM assignments WHERE userEmail = ? ORDER BY dueAt IS NULL, dueAt ASC, title ASC')
+    .all(email) as AssignmentRow[];
 
   return rows.map((row): Assignment => ({
     id: row.id,
@@ -819,12 +833,13 @@ export function listAssignments(): Assignment[] {
   }));
 }
 
-export function createAssignment(assignment: Assignment): Assignment {
+export function createAssignment(assignment: Assignment, userEmail: string): Assignment {
   const db = getDb();
+  const email = normalizeEmail(userEmail);
   const stmt = db.prepare(
     `INSERT INTO assignments
-      (id, course, title, dueAt, estMinutes, priority, type, completed, optional)
-     VALUES (@id, @course, @title, @dueAt, @estMinutes, @priority, @type, @completed, @optional)`
+      (id, course, title, dueAt, estMinutes, priority, type, completed, optional, userEmail)
+     VALUES (@id, @course, @title, @dueAt, @estMinutes, @priority, @type, @completed, @optional, @userEmail)`
   );
 
   const dueAt = assignment.dueAt != null && assignment.dueAt > 0 ? assignment.dueAt : null;
@@ -834,34 +849,39 @@ export function createAssignment(assignment: Assignment): Assignment {
       dueAt,
       completed: assignment.completed ? 1 : 0,
       optional: assignment.optional ? 1 : 0,
+      userEmail: email,
     })
   );
 
   return assignment;
 }
 
-export function updateAssignmentCompletion(id: string, completed: boolean): void {
+export function updateAssignmentCompletion(id: string, completed: boolean, userEmail: string): void {
   const db = getDb();
+  const email = normalizeEmail(userEmail);
   runWrite('assignments.updateCompletion', () =>
-    db.prepare('UPDATE assignments SET completed = ? WHERE id = ?').run(
+    db.prepare('UPDATE assignments SET completed = ? WHERE id = ? AND userEmail = ?').run(
       completed ? 1 : 0,
-      id
+      id,
+      email
     )
   );
 }
 
-export function deleteAssignment(id: string): void {
+export function deleteAssignment(id: string, userEmail: string): void {
   const db = getDb();
-  runWrite('assignments.delete', () => db.prepare('DELETE FROM assignments WHERE id = ?').run(id));
+  const email = normalizeEmail(userEmail);
+  runWrite('assignments.delete', () => db.prepare('DELETE FROM assignments WHERE id = ? AND userEmail = ?').run(id, email));
 }
 
 // Availability repository
 
-export function listAvailabilityBlocks(): AvailabilityBlock[] {
+export function listAvailabilityBlocks(userEmail: string): AvailabilityBlock[] {
   const db = getDb();
+  const email = normalizeEmail(userEmail);
   const rows = db
-    .prepare('SELECT * FROM availability_blocks ORDER BY startMin ASC')
-    .all() as AvailabilityRow[];
+    .prepare('SELECT * FROM availability_blocks WHERE userEmail = ? ORDER BY startMin ASC')
+    .all(email) as AvailabilityRow[];
 
   return rows.map((row) => ({
     id: row.id,
@@ -870,21 +890,23 @@ export function listAvailabilityBlocks(): AvailabilityBlock[] {
   }));
 }
 
-export function createAvailabilityBlock(block: AvailabilityBlock): AvailabilityBlock {
+export function createAvailabilityBlock(block: AvailabilityBlock, userEmail: string): AvailabilityBlock {
   const db = getDb();
+  const email = normalizeEmail(userEmail);
   runWrite('availability.insert', () =>
     db.prepare(
-      `INSERT INTO availability_blocks (id, startMin, endMin)
-       VALUES (@id, @startMin, @endMin)`
-    ).run(block)
+      `INSERT INTO availability_blocks (id, startMin, endMin, userEmail)
+       VALUES (@id, @startMin, @endMin, @userEmail)`
+    ).run({ ...block, userEmail: email })
   );
 
   return block;
 }
 
-export function deleteAvailabilityBlock(id: string): void {
+export function deleteAvailabilityBlock(id: string, userEmail: string): void {
   const db = getDb();
-  runWrite('availability.delete', () => db.prepare('DELETE FROM availability_blocks WHERE id = ?').run(id));
+  const email = normalizeEmail(userEmail);
+  runWrite('availability.delete', () => db.prepare('DELETE FROM availability_blocks WHERE id = ? AND userEmail = ?').run(id, email));
 }
 
 // Courses (teacher publishing)

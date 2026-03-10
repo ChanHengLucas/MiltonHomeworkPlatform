@@ -53,6 +53,39 @@ export interface HelpComment {
     body: string;
     createdAt: string;
 }
+export interface AssignmentSubmissionFile {
+    id: string;
+    submissionId: string;
+    originalName: string;
+    storedPath: string;
+    mimeType: string | null;
+    sizeBytes: number;
+    createdAt: string;
+}
+export interface AssignmentSubmission {
+    id: string;
+    assignmentId: string;
+    studentEmail: string;
+    comment: string | null;
+    links: string[];
+    createdAt: string;
+    updatedAt: string;
+    files: AssignmentSubmissionFile[];
+}
+export interface HelpRequestResource {
+    id: string;
+    requestId: string;
+    kind: 'link' | 'file';
+    label: string | null;
+    url: string | null;
+    originalName: string | null;
+    storedPath: string | null;
+    mimeType: string | null;
+    sizeBytes: number | null;
+    note: string | null;
+    createdAt: string;
+    createdByEmail: string | null;
+}
 export interface RequestsSummaryRow {
     subject: string;
     urgency: string;
@@ -69,13 +102,13 @@ export interface DbHealthCheckResult {
     checkedAt: string;
 }
 export declare function runDbHealthCheck(): DbHealthCheckResult;
-export declare function listAssignments(): Assignment[];
-export declare function createAssignment(assignment: Assignment): Assignment;
-export declare function updateAssignmentCompletion(id: string, completed: boolean): void;
-export declare function deleteAssignment(id: string): void;
-export declare function listAvailabilityBlocks(): AvailabilityBlock[];
-export declare function createAvailabilityBlock(block: AvailabilityBlock): AvailabilityBlock;
-export declare function deleteAvailabilityBlock(id: string): void;
+export declare function listAssignments(userEmail: string): Assignment[];
+export declare function createAssignment(assignment: Assignment, userEmail: string): Assignment;
+export declare function updateAssignmentCompletion(id: string, completed: boolean, userEmail: string): void;
+export declare function deleteAssignment(id: string, userEmail: string): void;
+export declare function listAvailabilityBlocks(userEmail: string): AvailabilityBlock[];
+export declare function createAvailabilityBlock(block: AvailabilityBlock, userEmail: string): AvailabilityBlock;
+export declare function deleteAvailabilityBlock(id: string, userEmail: string): void;
 export interface Course {
     id: string;
     name: string;
@@ -179,6 +212,32 @@ export interface CourseAssignmentWithCourse extends CourseAssignment {
 }
 export declare function listCourseAssignmentsForStudent(studentEmail: string): CourseAssignmentWithCourse[];
 export declare function listCourseAssignmentsByCourse(courseId: string): CourseAssignment[];
+export declare function getCourseAssignment(id: string): CourseAssignment | null;
+export declare function updateCourseAssignment(id: string, updates: {
+    title?: string;
+    description?: string | null;
+    dueAtMs?: number | null;
+    estMinutes?: number;
+    type?: string;
+}): CourseAssignment | null;
+export declare function upsertAssignmentSubmission(input: {
+    assignmentId: string;
+    studentEmail: string;
+    comment?: string | null;
+    links?: string[];
+}): AssignmentSubmission;
+export declare function listAssignmentSubmissionFiles(submissionId: string): AssignmentSubmissionFile[];
+export declare function addAssignmentSubmissionFile(input: {
+    submissionId: string;
+    originalName: string;
+    storedPath: string;
+    mimeType?: string | null;
+    sizeBytes: number;
+}): AssignmentSubmissionFile;
+export declare function getAssignmentSubmissionById(id: string): AssignmentSubmission | null;
+export declare function getAssignmentSubmissionByStudent(assignmentId: string, studentEmail: string): AssignmentSubmission | null;
+export declare function listAssignmentSubmissionsByStudent(studentEmail: string): AssignmentSubmission[];
+export declare function listAssignmentSubmissionsByAssignment(assignmentId: string): AssignmentSubmission[];
 export declare function createCourseAnnouncement(announcement: CourseAnnouncement): CourseAnnouncement;
 export declare function listCourseAnnouncementsByCourse(courseId: string): CourseAnnouncement[];
 export declare function createGradingTask(task: GradingTask): GradingTask;
@@ -238,6 +297,19 @@ export declare function deleteClosedRequestsOlderThanDays(days: number, logger?:
 };
 export declare function listCommentsForRequest(requestId: string): HelpComment[];
 export declare function addComment(comment: HelpComment): HelpComment;
+export declare function addHelpRequestResource(input: {
+    requestId: string;
+    kind: 'link' | 'file';
+    label?: string | null;
+    url?: string | null;
+    originalName?: string | null;
+    storedPath?: string | null;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+    note?: string | null;
+    createdByEmail?: string | null;
+}): HelpRequestResource;
+export declare function listHelpRequestResources(requestId: string): HelpRequestResource[];
 export declare function countActiveClaimsByEmail(email: string): number;
 export declare function countClaimsInLastHour(email: string): number;
 export declare function recordClaimEvent(requestId: string, claimedByEmail: string): void;

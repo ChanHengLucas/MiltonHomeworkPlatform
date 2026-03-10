@@ -11,6 +11,7 @@ import {
 import { makePlan } from '@planner/core';
 import type { Assignment, AvailabilityBlock } from '@planner/core';
 import { isTeacherEligible } from '../utils/identity';
+import { requireAuth } from '../middleware/identity';
 
 const postBodySchema = z.object({
   sessionMin: z.number().int().min(5).max(120).optional(),
@@ -89,6 +90,8 @@ function toPlanAssignment(
 
 export const planRouter = Router();
 
+planRouter.use(requireAuth);
+
 planRouter.post('/', async (req: Request, res, next) => {
   const parsed = postBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -103,7 +106,7 @@ planRouter.post('/', async (req: Request, res, next) => {
   const isTeacher = isTeacherEligible(userEmail);
   const preferences = userEmail ? getPlannerPreferences(userEmail) : null;
 
-  let assignments: Assignment[] = [...listAssignments()];
+  let assignments: Assignment[] = [...listAssignments(userEmail)];
 
   if (userEmail) {
     const courseAssignments = listCourseAssignmentsForStudent(userEmail);
@@ -122,7 +125,7 @@ planRouter.post('/', async (req: Request, res, next) => {
     }
   }
 
-  let availability = listAvailabilityBlocks();
+  let availability = listAvailabilityBlocks(userEmail);
 
   const busyBlocks = parsed.data.busyBlocks;
   if (busyBlocks && busyBlocks.length > 0) {

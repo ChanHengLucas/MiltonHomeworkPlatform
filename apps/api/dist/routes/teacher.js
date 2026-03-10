@@ -29,6 +29,13 @@ const createAnnouncementSchema = zod_1.z.object({
     title: zod_1.z.string().min(1, 'Announcement title is required'),
     body: zod_1.z.string().min(1, 'Announcement body is required'),
 });
+const updateAssignmentSchema = zod_1.z.object({
+    title: zod_1.z.string().min(1).optional(),
+    description: zod_1.z.string().optional().nullable(),
+    dueAtMs: zod_1.z.number().int().optional().nullable(),
+    estMinutes: zod_1.z.number().int().min(5).optional(),
+    type: zod_1.z.enum(['homework', 'quiz', 'test', 'project', 'reading', 'other']).optional(),
+});
 function generateCourseCode() {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let out = '';
@@ -48,6 +55,15 @@ function createUniqueCourseCode(maxAttempts = 20) {
 }
 exports.teacherRouter = (0, express_1.Router)();
 exports.teacherRouter.use(identity_1.requireTeacher);
+function getTeacherAssignmentOr404(assignmentId, teacherEmail) {
+    const assignment = (0, db_1.getCourseAssignment)(assignmentId);
+    if (!assignment)
+        return null;
+    const course = (0, db_1.getCourse)(assignment.courseId);
+    if (!course || course.teacherEmail !== teacherEmail)
+        return null;
+    return { assignment, course };
+}
 exports.teacherRouter.post('/courses', (req, res, next) => {
     const parsed = createCourseSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -150,6 +166,51 @@ exports.teacherRouter.get('/courses/:id/assignments', (req, res) => {
     }
     const assignments = (0, db_1.listCourseAssignmentsByCourse)(course.id);
     res.json(assignments);
+});
+exports.teacherRouter.patch('/assignments/:id', (req, res, next) => {
+    const owned = getTeacherAssignmentOr404(req.params.id, req.user.email);
+    if (!owned) {
+        return res.status(404).json({ error: 'Assignment not found' });
+    }
+    const parsed = updateAssignmentSchema.safeParse(req.body);
+    if (!parsed.success) {
+        const err = new Error(parsed.error.errors.map((e) => e.message).join('; '));
+        err.statusCode = 400;
+        return next(err);
+    }
+    const payload = parsed.data;
+    if (Object.keys(payload).length === 0) {
+        const err = new Error('At least one assignment field is required');
+        err.statusCode = 400;
+        return next(err);
+    }
+    const updated = (0, db_1.updateCourseAssignment)(req.params.id, payload);
+    if (!updated) {
+        return res.status(404).json({ error: 'Assignment not found' });
+    }
+    res.json(updated);
+});
+exports.teacherRouter.get('/assignments/:id/submissions', (req, res) => {
+    const owned = getTeacherAssignmentOr404(req.params.id, req.user.email);
+    if (!owned) {
+        return res.status(404).json({ error: 'Assignment not found' });
+    }
+    const submissions = (0, db_1.listAssignmentSubmissionsByAssignment)(req.params.id);
+    res.json({
+        assignment: owned.assignment,
+        submissions,
+    });
+});
+exports.teacherRouter.get('/assignments/:id/submissions/:submissionId', (req, res) => {
+    const owned = getTeacherAssignmentOr404(req.params.id, req.user.email);
+    if (!owned) {
+        return res.status(404).json({ error: 'Assignment not found' });
+    }
+    const submission = (0, db_1.getAssignmentSubmissionById)(req.params.submissionId);
+    if (!submission || submission.assignmentId !== req.params.id) {
+        return res.status(404).json({ error: 'Submission not found' });
+    }
+    res.json(submission);
 });
 exports.teacherRouter.post('/courses/:id/announcements', (req, res, next) => {
     const course = (0, db_1.getCourse)(req.params.id);

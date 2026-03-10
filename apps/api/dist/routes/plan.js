@@ -7,6 +7,7 @@ const zod_1 = require("zod");
 const db_1 = require("@planner/db");
 const core_1 = require("@planner/core");
 const identity_1 = require("../utils/identity");
+const identity_2 = require("../middleware/identity");
 const postBodySchema = zod_1.z.object({
     sessionMin: zod_1.z.number().int().min(5).max(120).optional(),
     now: zod_1.z.string().datetime().optional(),
@@ -68,6 +69,7 @@ function toPlanAssignment(id, course, title, dueAtMs, estMinutes, type) {
     };
 }
 exports.planRouter = (0, express_1.Router)();
+exports.planRouter.use(identity_2.requireAuth);
 exports.planRouter.post('/', async (req, res, next) => {
     const parsed = postBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -78,7 +80,7 @@ exports.planRouter.post('/', async (req, res, next) => {
     const userEmail = req.user?.email || '';
     const isTeacher = (0, identity_1.isTeacherEligible)(userEmail);
     const preferences = userEmail ? (0, db_1.getPlannerPreferences)(userEmail) : null;
-    let assignments = [...(0, db_1.listAssignments)()];
+    let assignments = [...(0, db_1.listAssignments)(userEmail)];
     if (userEmail) {
         const courseAssignments = (0, db_1.listCourseAssignmentsForStudent)(userEmail);
         for (const ca of courseAssignments) {
@@ -91,7 +93,7 @@ exports.planRouter.post('/', async (req, res, next) => {
             }
         }
     }
-    let availability = (0, db_1.listAvailabilityBlocks)();
+    let availability = (0, db_1.listAvailabilityBlocks)(userEmail);
     const busyBlocks = parsed.data.busyBlocks;
     if (busyBlocks && busyBlocks.length > 0) {
         const now = parsed.data.now ? new Date(parsed.data.now) : new Date();

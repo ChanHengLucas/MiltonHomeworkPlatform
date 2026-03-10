@@ -85,14 +85,16 @@ async function run() {
     console.log('PASS: /api/db/health');
   }
 
-  // Create assignment
+  const studentHeaders = { 'x-user-email': 'lucas_chan26@milton.edu', 'x-user-name': 'Lucas Chan' };
+
+  // Create assignment (now requires auth)
   const createA = await request('POST', '/api/assignments', {
     course: 'Smoke',
     title: 'Smoke test assignment',
     estMinutes: 30,
     priority: 3,
     type: 'homework',
-  });
+  }, studentHeaders);
   if ((createA.status !== 200 && createA.status !== 201) || !createA.data?.id) {
     console.error('FAIL: create assignment', createA.status, createA.data);
     failed++;
@@ -100,13 +102,22 @@ async function run() {
     console.log('PASS: create assignment');
   }
 
-  // List assignments
-  const listA = await request('GET', '/api/assignments');
+  // List assignments (now requires auth)
+  const listA = await request('GET', '/api/assignments', null, studentHeaders);
   if (listA.status !== 200 || !Array.isArray(listA.data)) {
     console.error('FAIL: list assignments');
     failed++;
   } else {
     console.log('PASS: list assignments');
+  }
+
+  // Verify auth guard: unauthenticated request should return 401
+  const unauthAssignments = await request('GET', '/api/assignments');
+  if (unauthAssignments.status !== 401) {
+    console.error('FAIL: unauthenticated /api/assignments should return 401', unauthAssignments.status);
+    failed++;
+  } else {
+    console.log('PASS: assignments auth guard');
   }
 
   // Create request as Student A

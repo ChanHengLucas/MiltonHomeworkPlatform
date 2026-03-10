@@ -6,6 +6,7 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const db_1 = require("@planner/db");
 const core_1 = require("@planner/core");
+const identity_1 = require("../middleware/identity");
 const assignmentTypeEnum = zod_1.z.enum(['homework', 'quiz', 'test', 'project', 'reading', 'other']);
 const prioritySchema = zod_1.z.number().int().min(1).max(5);
 const createBodySchema = zod_1.z.object({
@@ -29,6 +30,7 @@ const parseBodySchema = zod_1.z.object({
     text: zod_1.z.string(),
 });
 exports.assignmentsRouter = (0, express_1.Router)();
+exports.assignmentsRouter.use(identity_1.requireAuth);
 exports.assignmentsRouter.post('/parse', (req, res, next) => {
     const parsed = parseBodySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -39,8 +41,8 @@ exports.assignmentsRouter.post('/parse', (req, res, next) => {
     const draft = (0, core_1.parseAssignmentText)(parsed.data.text);
     res.json(draft);
 });
-exports.assignmentsRouter.get('/', (_req, res) => {
-    const assignments = (0, db_1.listAssignments)();
+exports.assignmentsRouter.get('/', (req, res) => {
+    const assignments = (0, db_1.listAssignments)(req.user.email);
     res.json(assignments);
 });
 exports.assignmentsRouter.post('/', (req, res, next) => {
@@ -66,7 +68,7 @@ exports.assignmentsRouter.post('/', (req, res, next) => {
         completed: false,
         optional: data.optional,
     };
-    (0, db_1.createAssignment)(assignment);
+    (0, db_1.createAssignment)(assignment, req.user.email);
     res.status(201).json(assignment);
 });
 exports.assignmentsRouter.put('/:id', (req, res, next) => {
@@ -77,12 +79,12 @@ exports.assignmentsRouter.put('/:id', (req, res, next) => {
         err.statusCode = 400;
         return next(err);
     }
-    (0, db_1.updateAssignmentCompletion)(id, parsed.data.completed);
-    const assignments = (0, db_1.listAssignments)();
+    (0, db_1.updateAssignmentCompletion)(id, parsed.data.completed, req.user.email);
+    const assignments = (0, db_1.listAssignments)(req.user.email);
     const updated = assignments.find((a) => a.id === id);
     res.json(updated ?? { id, completed: parsed.data.completed });
 });
 exports.assignmentsRouter.delete('/:id', (req, res) => {
-    (0, db_1.deleteAssignment)(req.params.id);
+    (0, db_1.deleteAssignment)(req.params.id, req.user.email);
     res.status(204).send();
 });

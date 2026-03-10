@@ -10,6 +10,7 @@ import {
 } from '@planner/db';
 import type { Assignment, AssignmentType } from '@planner/core';
 import { parseAssignmentText } from '@planner/core';
+import { requireAuth } from '../middleware/identity';
 
 const assignmentTypeEnum = z.enum(['homework', 'quiz', 'test', 'project', 'reading', 'other']);
 const prioritySchema = z.number().int().min(1).max(5);
@@ -39,6 +40,8 @@ const parseBodySchema = z.object({
 
 export const assignmentsRouter = Router();
 
+assignmentsRouter.use(requireAuth);
+
 assignmentsRouter.post('/parse', (req, res, next) => {
   const parsed = parseBodySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -52,8 +55,8 @@ assignmentsRouter.post('/parse', (req, res, next) => {
   res.json(draft);
 });
 
-assignmentsRouter.get('/', (_req, res) => {
-  const assignments = listAssignments();
+assignmentsRouter.get('/', (req, res) => {
+  const assignments = listAssignments(req.user!.email);
   res.json(assignments);
 });
 
@@ -83,7 +86,7 @@ assignmentsRouter.post('/', (req, res, next) => {
     optional: data.optional,
   };
 
-  createAssignment(assignment);
+  createAssignment(assignment, req.user!.email);
   res.status(201).json(assignment);
 });
 
@@ -98,13 +101,13 @@ assignmentsRouter.put('/:id', (req, res, next) => {
     return next(err);
   }
 
-  updateAssignmentCompletion(id, parsed.data.completed);
-  const assignments = listAssignments();
+  updateAssignmentCompletion(id, parsed.data.completed, req.user!.email);
+  const assignments = listAssignments(req.user!.email);
   const updated = assignments.find((a) => a.id === id);
   res.json(updated ?? { id, completed: parsed.data.completed });
 });
 
 assignmentsRouter.delete('/:id', (req, res) => {
-  deleteAssignment(req.params.id);
+  deleteAssignment(req.params.id, req.user!.email);
   res.status(204).send();
 });

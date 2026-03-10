@@ -5,13 +5,15 @@ const crypto_1 = require("crypto");
 const express_1 = require("express");
 const zod_1 = require("zod");
 const db_1 = require("@planner/db");
+const identity_1 = require("../middleware/identity");
 const createBodySchema = zod_1.z.object({
     startMin: zod_1.z.number().int().min(0),
     endMin: zod_1.z.number().int().min(0),
 });
 exports.availabilityRouter = (0, express_1.Router)();
-exports.availabilityRouter.get('/', (_req, res) => {
-    const blocks = (0, db_1.listAvailabilityBlocks)();
+exports.availabilityRouter.use(identity_1.requireAuth);
+exports.availabilityRouter.get('/', (req, res) => {
+    const blocks = (0, db_1.listAvailabilityBlocks)(req.user.email);
     res.json(blocks);
 });
 exports.availabilityRouter.post('/', (req, res, next) => {
@@ -32,10 +34,10 @@ exports.availabilityRouter.post('/', (req, res, next) => {
         startMin,
         endMin,
     };
-    (0, db_1.createAvailabilityBlock)(block);
+    (0, db_1.createAvailabilityBlock)(block, req.user.email);
     res.status(201).json(block);
 });
 exports.availabilityRouter.delete('/:id', (req, res) => {
-    (0, db_1.deleteAvailabilityBlock)(req.params.id);
+    (0, db_1.deleteAvailabilityBlock)(req.params.id, req.user.email);
     res.status(204).send();
 });

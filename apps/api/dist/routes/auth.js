@@ -11,6 +11,15 @@ const AUTH_MODE_INFO = (0, authMode_1.getAuthModeInfo)();
 const AUTH_MODE = AUTH_MODE_INFO.mode;
 const FALLBACK_WEB_ORIGIN = (0, authMode_1.getWebOriginFallback)();
 exports.authRouter = (0, express_1.Router)();
+function roleFromEmail(email) {
+    if (!(0, identity_1.isMiltonEmail)(email))
+        return 'unknown';
+    if ((0, identity_1.isTeacherEligible)(email))
+        return 'teacher';
+    if ((0, identity_1.isStudentEmail)(email))
+        return 'student';
+    return 'unknown';
+}
 function getOAuthClient() {
     return new google_auth_library_1.OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, AUTH_MODE_INFO.googleCallbackUrl);
 }
@@ -147,6 +156,8 @@ exports.authRouter.get('/me', (req, res) => {
             name,
             picture: null,
             isTeacher: (0, identity_1.isTeacherEligible)(email),
+            isStudent: (0, identity_1.isStudentEmail)(email),
+            role: roleFromEmail(email),
             mode: 'dev',
             authenticated: Boolean(email),
         });
@@ -161,6 +172,8 @@ exports.authRouter.get('/me', (req, res) => {
         name: user.name,
         picture: user.picture ?? null,
         isTeacher: (0, identity_1.isTeacherEligible)(user.email),
+        isStudent: (0, identity_1.isStudentEmail)(user.email),
+        role: roleFromEmail(user.email),
         mode: 'google',
         authenticated: true,
     });

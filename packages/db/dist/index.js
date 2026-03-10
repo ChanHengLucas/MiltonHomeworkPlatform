@@ -26,6 +26,15 @@ exports.listCoursesByStudent = listCoursesByStudent;
 exports.createCourseAssignment = createCourseAssignment;
 exports.listCourseAssignmentsForStudent = listCourseAssignmentsForStudent;
 exports.listCourseAssignmentsByCourse = listCourseAssignmentsByCourse;
+exports.getCourseAssignment = getCourseAssignment;
+exports.updateCourseAssignment = updateCourseAssignment;
+exports.upsertAssignmentSubmission = upsertAssignmentSubmission;
+exports.listAssignmentSubmissionFiles = listAssignmentSubmissionFiles;
+exports.addAssignmentSubmissionFile = addAssignmentSubmissionFile;
+exports.getAssignmentSubmissionById = getAssignmentSubmissionById;
+exports.getAssignmentSubmissionByStudent = getAssignmentSubmissionByStudent;
+exports.listAssignmentSubmissionsByStudent = listAssignmentSubmissionsByStudent;
+exports.listAssignmentSubmissionsByAssignment = listAssignmentSubmissionsByAssignment;
 exports.createCourseAnnouncement = createCourseAnnouncement;
 exports.listCourseAnnouncementsByCourse = listCourseAnnouncementsByCourse;
 exports.createGradingTask = createGradingTask;
@@ -53,6 +62,8 @@ exports.deleteAllClosedRequests = deleteAllClosedRequests;
 exports.deleteClosedRequestsOlderThanDays = deleteClosedRequestsOlderThanDays;
 exports.listCommentsForRequest = listCommentsForRequest;
 exports.addComment = addComment;
+exports.addHelpRequestResource = addHelpRequestResource;
+exports.listHelpRequestResources = listHelpRequestResources;
 exports.countActiveClaimsByEmail = countActiveClaimsByEmail;
 exports.countClaimsInLastHour = countClaimsInLastHour;
 exports.recordClaimEvent = recordClaimEvent;
@@ -480,6 +491,64 @@ const MIGRATIONS = [
       ALTER TABLE assignments ADD COLUMN optional INTEGER NOT NULL DEFAULT 0;
       UPDATE assignments SET optional = 0 WHERE optional IS NULL;
     `
+    },
+    {
+        id: '017_submissions_and_request_resources',
+        up: `
+
+      CREATE TABLE IF NOT EXISTS assignment_submissions (
+        id TEXT PRIMARY KEY,
+        assignmentId TEXT NOT NULL,
+        studentEmail TEXT NOT NULL,
+        comment TEXT,
+        linksJson TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (assignmentId) REFERENCES course_assignments(id) ON DELETE CASCADE,
+        UNIQUE(assignmentId, studentEmail)
+      );
+      CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON assignment_submissions(assignmentId, updatedAt DESC);
+      CREATE INDEX IF NOT EXISTS idx_assignment_submissions_student ON assignment_submissions(studentEmail, updatedAt DESC);
+
+      CREATE TABLE IF NOT EXISTS assignment_submission_files (
+        id TEXT PRIMARY KEY,
+        submissionId TEXT NOT NULL,
+        originalName TEXT NOT NULL,
+        storedPath TEXT NOT NULL,
+        mimeType TEXT,
+        sizeBytes INTEGER NOT NULL,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (submissionId) REFERENCES assignment_submissions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_assignment_submission_files_submission ON assignment_submission_files(submissionId, createdAt ASC);
+
+      CREATE TABLE IF NOT EXISTS help_request_resources (
+        id TEXT PRIMARY KEY,
+        requestId TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        label TEXT,
+        url TEXT,
+        originalName TEXT,
+        storedPath TEXT,
+        mimeType TEXT,
+        sizeBytes INTEGER,
+        note TEXT,
+        createdAt TEXT NOT NULL,
+        createdByEmail TEXT,
+        FOREIGN KEY (requestId) REFERENCES help_requests(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_help_request_resources_request ON help_request_resources(requestId, createdAt ASC);
+    `
+    },
+    {
+        id: '018_per_user_assignments_availability',
+        up: `
+      ALTER TABLE assignments ADD COLUMN userEmail TEXT;
+      CREATE INDEX IF NOT EXISTS idx_assignments_userEmail ON assignments(userEmail);
+
+      ALTER TABLE availability_blocks ADD COLUMN userEmail TEXT;
+      CREATE INDEX IF NOT EXISTS idx_availability_blocks_userEmail ON availability_blocks(userEmail);
+    `
     }
 ];
 function applyMigrations() {
@@ -538,11 +607,12 @@ function runDbHealthCheck() {
     };
 }
 // Assignment repository
-function listAssignments() {
+function listAssignments(userEmail) {
     const db = getDb();
+    const email = normalizeEmail(userEmail);
     const rows = db
-        .prepare('SELECT * FROM assignments ORDER BY dueAt IS NULL, dueAt ASC, title ASC')
-        .all();
+        .prepare('SELECT * FROM assignments WHERE userEmail = ? ORDER BY dueAt IS NULL, dueAt ASC, title ASC')
+        .all(email);
     return rows.map((row) => ({
         id: row.id,
         course: row.course,
@@ -555,49 +625,56 @@ function listAssignments() {
         optional: !!row.optional,
     }));
 }
-function createAssignment(assignment) {
+function createAssignment(assignment, userEmail) {
     const db = getDb();
+    const email = normalizeEmail(userEmail);
     const stmt = db.prepare(`INSERT INTO assignments
-      (id, course, title, dueAt, estMinutes, priority, type, completed, optional)
-     VALUES (@id, @course, @title, @dueAt, @estMinutes, @priority, @type, @completed, @optional)`);
+      (id, course, title, dueAt, estMinutes, priority, type, completed, optional, userEmail)
+     VALUES (@id, @course, @title, @dueAt, @estMinutes, @priority, @type, @completed, @optional, @userEmail)`);
     const dueAt = assignment.dueAt != null && assignment.dueAt > 0 ? assignment.dueAt : null;
     runWrite('assignments.insert', () => stmt.run({
         ...assignment,
         dueAt,
         completed: assignment.completed ? 1 : 0,
         optional: assignment.optional ? 1 : 0,
+        userEmail: email,
     }));
     return assignment;
 }
-function updateAssignmentCompletion(id, completed) {
+function updateAssignmentCompletion(id, completed, userEmail) {
     const db = getDb();
-    runWrite('assignments.updateCompletion', () => db.prepare('UPDATE assignments SET completed = ? WHERE id = ?').run(completed ? 1 : 0, id));
+    const email = normalizeEmail(userEmail);
+    runWrite('assignments.updateCompletion', () => db.prepare('UPDATE assignments SET completed = ? WHERE id = ? AND userEmail = ?').run(completed ? 1 : 0, id, email));
 }
-function deleteAssignment(id) {
+function deleteAssignment(id, userEmail) {
     const db = getDb();
-    runWrite('assignments.delete', () => db.prepare('DELETE FROM assignments WHERE id = ?').run(id));
+    const email = normalizeEmail(userEmail);
+    runWrite('assignments.delete', () => db.prepare('DELETE FROM assignments WHERE id = ? AND userEmail = ?').run(id, email));
 }
 // Availability repository
-function listAvailabilityBlocks() {
+function listAvailabilityBlocks(userEmail) {
     const db = getDb();
+    const email = normalizeEmail(userEmail);
     const rows = db
-        .prepare('SELECT * FROM availability_blocks ORDER BY startMin ASC')
-        .all();
+        .prepare('SELECT * FROM availability_blocks WHERE userEmail = ? ORDER BY startMin ASC')
+        .all(email);
     return rows.map((row) => ({
         id: row.id,
         startMin: row.startMin,
         endMin: row.endMin
     }));
 }
-function createAvailabilityBlock(block) {
+function createAvailabilityBlock(block, userEmail) {
     const db = getDb();
-    runWrite('availability.insert', () => db.prepare(`INSERT INTO availability_blocks (id, startMin, endMin)
-       VALUES (@id, @startMin, @endMin)`).run(block));
+    const email = normalizeEmail(userEmail);
+    runWrite('availability.insert', () => db.prepare(`INSERT INTO availability_blocks (id, startMin, endMin, userEmail)
+       VALUES (@id, @startMin, @endMin, @userEmail)`).run({ ...block, userEmail: email }));
     return block;
 }
-function deleteAvailabilityBlock(id) {
+function deleteAvailabilityBlock(id, userEmail) {
     const db = getDb();
-    runWrite('availability.delete', () => db.prepare('DELETE FROM availability_blocks WHERE id = ?').run(id));
+    const email = normalizeEmail(userEmail);
+    runWrite('availability.delete', () => db.prepare('DELETE FROM availability_blocks WHERE id = ? AND userEmail = ?').run(id, email));
 }
 function createCourse(course) {
     const db = getDb();
@@ -676,6 +753,165 @@ function listCourseAssignmentsByCourse(courseId) {
         .prepare('SELECT * FROM course_assignments WHERE courseId = ? ORDER BY dueAtMs IS NULL, dueAtMs ASC, title ASC')
         .all(courseId);
     return rows;
+}
+function getCourseAssignment(id) {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM course_assignments WHERE id = ?').get(id);
+    return row ?? null;
+}
+function updateCourseAssignment(id, updates) {
+    const setClauses = [];
+    const params = [];
+    if (typeof updates.title === 'string') {
+        setClauses.push('title = ?');
+        params.push(updates.title);
+    }
+    if (updates.description !== undefined) {
+        setClauses.push('description = ?');
+        params.push(updates.description ?? null);
+    }
+    if (updates.dueAtMs !== undefined) {
+        setClauses.push('dueAtMs = ?');
+        params.push(updates.dueAtMs ?? null);
+    }
+    if (typeof updates.estMinutes === 'number') {
+        setClauses.push('estMinutes = ?');
+        params.push(Math.max(5, Math.round(updates.estMinutes)));
+    }
+    if (typeof updates.type === 'string') {
+        setClauses.push('type = ?');
+        params.push(updates.type);
+    }
+    if (setClauses.length === 0) {
+        return getCourseAssignment(id);
+    }
+    params.push(id);
+    const db = getDb();
+    runWrite('course_assignments.update', () => db.prepare(`UPDATE course_assignments SET ${setClauses.join(', ')} WHERE id = ?`).run(...params));
+    return getCourseAssignment(id);
+}
+function parseLinksJson(raw) {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed))
+            return [];
+        const out = [];
+        for (const item of parsed) {
+            if (typeof item !== 'string')
+                continue;
+            const normalized = item.trim();
+            if (!normalized)
+                continue;
+            if (out.includes(normalized))
+                continue;
+            out.push(normalized);
+        }
+        return out;
+    }
+    catch {
+        return [];
+    }
+}
+function toSubmissionFile(row) {
+    return {
+        id: row.id,
+        submissionId: row.submissionId,
+        originalName: row.originalName,
+        storedPath: row.storedPath,
+        mimeType: row.mimeType ?? null,
+        sizeBytes: row.sizeBytes,
+        createdAt: row.createdAt,
+    };
+}
+function toSubmission(row, files) {
+    return {
+        id: row.id,
+        assignmentId: row.assignmentId,
+        studentEmail: row.studentEmail,
+        comment: row.comment ?? null,
+        links: parseLinksJson(row.linksJson),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        files,
+    };
+}
+function upsertAssignmentSubmission(input) {
+    const db = getDb();
+    const email = normalizeEmail(input.studentEmail);
+    const links = Array.from(new Set((input.links || []).map((l) => l.trim()).filter(Boolean))).slice(0, 8);
+    const comment = input.comment?.trim() ? input.comment.trim() : null;
+    const now = new Date().toISOString();
+    runWrite('assignment_submissions.upsert', () => db.prepare(`INSERT INTO assignment_submissions
+        (id, assignmentId, studentEmail, comment, linksJson, createdAt, updatedAt)
+       VALUES
+        (@id, @assignmentId, @studentEmail, @comment, @linksJson, @createdAt, @updatedAt)
+       ON CONFLICT(assignmentId, studentEmail) DO UPDATE SET
+        comment = excluded.comment,
+        linksJson = excluded.linksJson,
+        updatedAt = excluded.updatedAt`).run({
+        id: (0, crypto_1.randomUUID)(),
+        assignmentId: input.assignmentId,
+        studentEmail: email,
+        comment,
+        linksJson: links.length > 0 ? JSON.stringify(links) : null,
+        createdAt: now,
+        updatedAt: now,
+    }));
+    const row = db.prepare('SELECT * FROM assignment_submissions WHERE assignmentId = ? AND studentEmail = ?').get(input.assignmentId, email);
+    const files = listAssignmentSubmissionFiles(row.id);
+    return toSubmission(row, files);
+}
+function listAssignmentSubmissionFiles(submissionId) {
+    const db = getDb();
+    const rows = db.prepare('SELECT * FROM assignment_submission_files WHERE submissionId = ? ORDER BY createdAt ASC').all(submissionId);
+    return rows.map(toSubmissionFile);
+}
+function addAssignmentSubmissionFile(input) {
+    const db = getDb();
+    const file = {
+        id: (0, crypto_1.randomUUID)(),
+        submissionId: input.submissionId,
+        originalName: input.originalName,
+        storedPath: input.storedPath,
+        mimeType: input.mimeType ?? null,
+        sizeBytes: Math.max(0, Math.round(input.sizeBytes)),
+        createdAt: new Date().toISOString(),
+    };
+    runWrite('assignment_submission_files.insert', () => db.prepare(`INSERT INTO assignment_submission_files
+        (id, submissionId, originalName, storedPath, mimeType, sizeBytes, createdAt)
+       VALUES
+        (@id, @submissionId, @originalName, @storedPath, @mimeType, @sizeBytes, @createdAt)`).run(file));
+    return file;
+}
+function getAssignmentSubmissionById(id) {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM assignment_submissions WHERE id = ?').get(id);
+    if (!row)
+        return null;
+    const files = listAssignmentSubmissionFiles(row.id);
+    return toSubmission(row, files);
+}
+function getAssignmentSubmissionByStudent(assignmentId, studentEmail) {
+    const db = getDb();
+    const email = normalizeEmail(studentEmail);
+    const row = db.prepare('SELECT * FROM assignment_submissions WHERE assignmentId = ? AND studentEmail = ?').get(assignmentId, email);
+    if (!row)
+        return null;
+    const files = listAssignmentSubmissionFiles(row.id);
+    return toSubmission(row, files);
+}
+function listAssignmentSubmissionsByStudent(studentEmail) {
+    const db = getDb();
+    const email = normalizeEmail(studentEmail);
+    const rows = db.prepare('SELECT * FROM assignment_submissions WHERE studentEmail = ? ORDER BY updatedAt DESC').all(email);
+    return rows.map((row) => toSubmission(row, listAssignmentSubmissionFiles(row.id)));
+}
+function listAssignmentSubmissionsByAssignment(assignmentId) {
+    const db = getDb();
+    const rows = db.prepare('SELECT * FROM assignment_submissions WHERE assignmentId = ? ORDER BY updatedAt DESC').all(assignmentId);
+    return rows.map((row) => toSubmission(row, listAssignmentSubmissionFiles(row.id)));
 }
 function createCourseAnnouncement(announcement) {
     const db = getDb();
@@ -1189,6 +1425,49 @@ function addComment(comment) {
         authorEmail: comment.authorEmail ?? null,
     }));
     return comment;
+}
+function rowToHelpRequestResource(row) {
+    return {
+        id: row.id,
+        requestId: row.requestId,
+        kind: row.kind === 'file' ? 'file' : 'link',
+        label: row.label ?? null,
+        url: row.url ?? null,
+        originalName: row.originalName ?? null,
+        storedPath: row.storedPath ?? null,
+        mimeType: row.mimeType ?? null,
+        sizeBytes: row.sizeBytes ?? null,
+        note: row.note ?? null,
+        createdAt: row.createdAt,
+        createdByEmail: row.createdByEmail ?? null,
+    };
+}
+function addHelpRequestResource(input) {
+    const db = getDb();
+    const resource = {
+        id: (0, crypto_1.randomUUID)(),
+        requestId: input.requestId,
+        kind: input.kind,
+        label: input.label?.trim() ? input.label.trim() : null,
+        url: input.url?.trim() ? input.url.trim() : null,
+        originalName: input.originalName?.trim() ? input.originalName.trim() : null,
+        storedPath: input.storedPath?.trim() ? input.storedPath.trim() : null,
+        mimeType: input.mimeType?.trim() ? input.mimeType.trim() : null,
+        sizeBytes: input.sizeBytes == null ? null : Math.max(0, Math.round(input.sizeBytes)),
+        note: input.note?.trim() ? input.note.trim() : null,
+        createdAt: new Date().toISOString(),
+        createdByEmail: input.createdByEmail?.trim() ? normalizeEmail(input.createdByEmail) : null,
+    };
+    runWrite('help_request_resources.insert', () => db.prepare(`INSERT INTO help_request_resources
+        (id, requestId, kind, label, url, originalName, storedPath, mimeType, sizeBytes, note, createdAt, createdByEmail)
+       VALUES
+        (@id, @requestId, @kind, @label, @url, @originalName, @storedPath, @mimeType, @sizeBytes, @note, @createdAt, @createdByEmail)`).run(resource));
+    return resource;
+}
+function listHelpRequestResources(requestId) {
+    const db = getDb();
+    const rows = db.prepare('SELECT * FROM help_request_resources WHERE requestId = ? ORDER BY createdAt ASC').all(requestId);
+    return rows.map(rowToHelpRequestResource);
 }
 // Claim limits & blocklist
 function countActiveClaimsByEmail(email) {

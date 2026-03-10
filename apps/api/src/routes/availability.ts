@@ -7,6 +7,7 @@ import {
   createAvailabilityBlock,
   deleteAvailabilityBlock,
 } from '@planner/db';
+import { requireAuth } from '../middleware/identity';
 
 const createBodySchema = z.object({
   startMin: z.number().int().min(0),
@@ -15,8 +16,10 @@ const createBodySchema = z.object({
 
 export const availabilityRouter = Router();
 
-availabilityRouter.get('/', (_req, res) => {
-  const blocks = listAvailabilityBlocks();
+availabilityRouter.use(requireAuth);
+
+availabilityRouter.get('/', (req, res) => {
+  const blocks = listAvailabilityBlocks(req.user!.email);
   res.json(blocks);
 });
 
@@ -43,11 +46,11 @@ availabilityRouter.post('/', (req, res, next) => {
     endMin,
   };
 
-  createAvailabilityBlock(block);
+  createAvailabilityBlock(block, req.user!.email);
   res.status(201).json(block);
 });
 
 availabilityRouter.delete('/:id', (req, res) => {
-  deleteAvailabilityBlock(req.params.id);
+  deleteAvailabilityBlock(req.params.id, req.user!.email);
   res.status(204).send();
 });
