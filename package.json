@@ -20,7 +20,7 @@
     "format": "prettier --write .",
     "db:migrate": "npm run build -w packages/core && npm run build -w packages/db && node packages/db/dist/migrate.js",
     "db:reset": "node scripts/db-reset.js && npm run db:migrate",
-    "dev:api": "npm --workspace apps/api run dev",
+    "dev:api": "npm run build -w packages/core && npm run build -w packages/db && npm --workspace apps/api run dev",
     "dev:web": "npm --workspace apps/web run dev"
   },
   "devDependencies": {
