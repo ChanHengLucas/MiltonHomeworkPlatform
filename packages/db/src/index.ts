@@ -1287,6 +1287,14 @@ export function addAssignmentSubmissionFile(input: {
   return file;
 }
 
+export function deleteAssignmentSubmissionFile(fileId: string, submissionId: string): boolean {
+  const db = getDb();
+  const result = runWrite('assignment_submission_files.delete', () =>
+    db.prepare('DELETE FROM assignment_submission_files WHERE id = ? AND submissionId = ?').run(fileId, submissionId)
+  );
+  return result.changes > 0;
+}
+
 export function getAssignmentSubmissionById(id: string): AssignmentSubmission | null {
   const db = getDb();
   const row = db.prepare('SELECT * FROM assignment_submissions WHERE id = ?').get(id) as AssignmentSubmissionRow | undefined;

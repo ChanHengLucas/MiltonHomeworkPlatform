@@ -1,16 +1,17 @@
-/* Design system */
+/* Design system — Milton Academy: orange & blue */
 :root {
-  --color-bg: #0f1419;
-  --color-surface: #161b22;
-  --color-surface-elevated: #1c2128;
-  --color-border: #21262d;
+  --color-bg: #0c1220;
+  --color-surface: #131b2e;
+  --color-surface-elevated: #1a2338;
+  --color-border: #232d42;
   --color-text: #e6edf3;
   --color-text-muted: #8b949e;
-  --color-primary: #238636;
-  --color-primary-hover: #2ea043;
+  --color-primary: #e87722;
+  --color-primary-hover: #f08a3a;
   --color-danger: #da3633;
   --color-danger-hover: #f85149;
-  --color-accent: #58a6ff;
+  --color-accent: #4a90d9;
+  --color-accent-bright: #e87722;
   --color-warn: #d29922;
   --color-warn-bg: rgba(210, 153, 34, 0.15);
   --radius: 12px;
@@ -32,8 +33,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(88, 166, 255, 0.1), transparent 60%),
-    radial-gradient(900px 500px at 90% 0%, rgba(35, 134, 54, 0.08), transparent 55%),
+    radial-gradient(1200px 600px at 10% -10%, rgba(74, 144, 217, 0.1), transparent 60%),
+    radial-gradient(900px 500px at 90% 0%, rgba(232, 119, 34, 0.06), transparent 55%),
     var(--color-bg);
   color: var(--color-text);
   font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
@@ -56,7 +57,7 @@ a {
 .header {
   width: 100%;
   border-bottom: 1px solid var(--color-border);
-  background: color-mix(in oklab, var(--color-surface) 92%, #000 8%);
+  background: color-mix(in oklab, var(--color-surface) 94%, #000 6%);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -111,6 +112,10 @@ a {
   color: var(--color-accent);
 }
 
+.header-logo-milton {
+  color: var(--color-accent-bright);
+}
+
 .nav {
   display: flex;
   gap: 0.5rem;
@@ -136,7 +141,7 @@ a {
 
 .nav-link.active {
   color: var(--color-accent);
-  background: rgba(31, 111, 235, 0.2);
+  background: rgba(74, 144, 217, 0.2);
 }
 
 .header-right {
@@ -199,8 +204,8 @@ a {
   padding: 0 0.3rem;
   height: 1.15rem;
   border-radius: 999px;
-  background: var(--color-accent);
-  color: #071221;
+  background: var(--color-accent-bright);
+  color: #fff;
   font-size: 0.7rem;
   font-weight: 700;
 }
@@ -800,8 +805,8 @@ a {
 
 .status-claimed {
   color: #9ac8ff;
-  background: rgba(31, 111, 235, 0.2);
-  border-color: rgba(31, 111, 235, 0.35);
+  background: rgba(74, 144, 217, 0.2);
+  border-color: rgba(74, 144, 217, 0.35);
 }
 
 .status-closed {
@@ -830,7 +835,7 @@ a {
 .filter-chip.active {
   color: var(--color-accent);
   border-color: color-mix(in oklab, var(--color-accent) 45%, var(--color-border));
-  background: rgba(31, 111, 235, 0.16);
+  background: rgba(74, 144, 217, 0.16);
 }
 
 .split-header {

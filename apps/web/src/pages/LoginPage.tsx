@@ -45,7 +45,7 @@ export function LoginPage() {
         <Card className="auth-card">
           <div className="auth-header">
             <span className="status-chip status-open auth-mode-badge">Checking Auth</span>
-            <h1 className="page-title">Sign in</h1>
+            <h1 className="page-title">Milton Planner</h1>
             <p className="page-subtitle">Checking authentication status…</p>
             <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
               <div className="ui-spinner" />
@@ -62,7 +62,7 @@ export function LoginPage() {
         <Card className="auth-card">
           <div className="auth-header">
             <span className="status-chip status-claimed auth-mode-badge">Mock Auth</span>
-            <h1 className="page-title">Sign in</h1>
+            <h1 className="page-title">Milton Planner</h1>
             <p className="page-subtitle">Student mode is active for local and E2E flows.</p>
           </div>
           <p className="auth-subcopy">
@@ -88,7 +88,7 @@ export function LoginPage() {
           <span className={`status-chip ${isDevMode ? 'status-claimed' : 'status-open'} auth-mode-badge`}>
             {isDevMode ? 'DEV MODE' : 'Google Auth'}
           </span>
-          <h1 className="page-title">Sign in</h1>
+          <h1 className="page-title">Milton Planner</h1>
           <p className="page-subtitle">
             {isDevMode
               ? 'DEV MODE (no Google). Choose a dev identity to continue.'

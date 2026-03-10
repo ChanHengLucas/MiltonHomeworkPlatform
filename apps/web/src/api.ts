@@ -488,6 +488,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  deleteStudentAssignmentFile: (assignmentId: string, fileId: string) =>
+    request<AssignmentSubmission>(`/student/assignments/${assignmentId}/submission/files/${fileId}`, {
+      method: 'DELETE',
+    }),
   listStudentCourses: () =>
     request<PlannerCourse[]>('/student/courses'),
   joinCourseByCode: (courseCode: string) =>

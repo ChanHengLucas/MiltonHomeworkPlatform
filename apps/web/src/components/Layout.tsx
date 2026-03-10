@@ -19,12 +19,12 @@ export function Layout() {
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
 
   const navItems = [
-    { to: teacherEligible ? '/teacher/homework' : '/assignments', label: teacherEligible ? 'Homework' : 'Assignments' },
+    { to: '/assignments', label: 'Assignments' },
     { to: '/courses', label: 'Courses' },
     { to: '/plan', label: 'Plan' },
     { to: '/availability', label: 'Availability' },
     { to: '/support', label: 'Support' },
-    ...(teacherEligible ? [{ to: '/teacher', label: 'Teacher' }] : []),
+    ...(teacherEligible ? [{ to: '/teacher/homework', label: 'Dashboard' }] : []),
     ...(teacherEligible ? [{ to: '/insights', label: 'Insights' }] : []),
     { to: '/settings', label: 'Settings' },
   ];
@@ -185,7 +185,7 @@ export function Layout() {
         <div className="shell-header-inner">
           <div className="header-left">
             <NavLink to="/assignments" className="header-logo">
-              Academic Planner
+              <span className="header-logo-milton">Milton</span> Planner
             </NavLink>
             <nav className="nav">
               {navItems.map(({ to, label }) => (

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   addCourseMember,
   addAssignmentSubmissionFile,
+  deleteAssignmentSubmissionFile,
   getAssignmentSubmissionByStudent,
   getCourseAssignment,
   getCourse,
@@ -136,6 +137,24 @@ studentRouter.post('/assignments/:assignmentId/submission/files', (req: Request,
 
     const updated = getAssignmentSubmissionByStudent(req.params.assignmentId, req.user!.email);
     res.status(201).json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+studentRouter.delete('/assignments/:assignmentId/submission/files/:fileId', (req: Request, res, next) => {
+  try {
+    requireStudentAssignmentAccess(req.params.assignmentId, req.user!.email);
+    const submission = getAssignmentSubmissionByStudent(req.params.assignmentId, req.user!.email);
+    if (!submission) {
+      return next(httpError('Submission not found', 404));
+    }
+    const deleted = deleteAssignmentSubmissionFile(req.params.fileId, submission.id);
+    if (!deleted) {
+      return next(httpError('File not found', 404));
+    }
+    const updated = getAssignmentSubmissionByStudent(req.params.assignmentId, req.user!.email);
+    res.json(updated);
   } catch (err) {
     next(err);
   }

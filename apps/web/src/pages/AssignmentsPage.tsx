@@ -12,11 +12,11 @@ import { useAuthGate } from '../hooks/useAuthGate';
 import { fromDateTimeLocalValue, formatDueDate } from '../utils/datetime';
 
 const PRIORITY_OPTIONS = [
-  { value: 1, label: 'Low' },
+  { value: 1, label: 'Lowest' },
   { value: 2, label: 'Low' },
   { value: 3, label: 'Medium' },
   { value: 4, label: 'High' },
-  { value: 5, label: 'High' },
+  { value: 5, label: 'Urgent' },
 ];
 
 interface SubmissionDraft {
@@ -552,8 +552,31 @@ export function AssignmentsPage() {
                           <p className="form-hint" style={{ margin: '0 0 0.25rem 0' }}>Uploaded files</p>
                           <ul style={{ margin: 0, paddingLeft: '1rem' }}>
                             {submission.files.map((file) => (
-                              <li key={file.id} className="form-hint">
-                                {file.originalName} ({Math.round(file.sizeBytes / 1024)} KB)
+                              <li key={file.id} className="form-hint" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <a
+                                  className="link"
+                                  href={`/api/uploads/submissions/${submission.id}/files/${file.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {file.originalName}
+                                </a>
+                                <span>({Math.round(file.sizeBytes / 1024)} KB)</span>
+                                <button
+                                  type="button"
+                                  className="ui-btn btn-danger btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.72rem' }}
+                                  onClick={async () => {
+                                    try {
+                                      const updated = await api.deleteStudentAssignmentFile(assignment.id, file.id);
+                                      setSubmissionByAssignment((prev) => ({ ...prev, [assignment.id]: updated }));
+                                    } catch (e) {
+                                      setError(e instanceof Error ? e.message : 'Failed to delete file');
+                                    }
+                                  }}
+                                >
+                                  Remove
+                                </button>
                               </li>
                             ))}
                           </ul>
